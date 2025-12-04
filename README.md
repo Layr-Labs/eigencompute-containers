@@ -4,7 +4,7 @@
 
   ## Overview
 
-  This repository hosts verified, production ready container images for the EigenCompute. All images are built using
+  This repository hosts verified, production container images for the EigenCompute. All images are built using
    GCP cloud build process and published to GitHub Container Registry for transparency and auditability.
 
   ## Container Registry
