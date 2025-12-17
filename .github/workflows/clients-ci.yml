@@ -2,7 +2,7 @@ name: Clients CI
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
 
 jobs:
@@ -38,11 +38,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: ${{ matrix.client }}/go.mod
+      - name: Install golangci-lint (built with this Go toolchain)
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
-          working-directory: ${{ matrix.client }}
+        run: golangci-lint run
+        working-directory: ${{ matrix.client }}
 
   client-docker-build:
     runs-on: ubuntu-latest

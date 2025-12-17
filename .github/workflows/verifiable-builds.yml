@@ -1,4 +1,4 @@
-name: Verifiable Builds (submit)
+name: Submit Verifiable Builds
 
 on:
   push:
@@ -12,16 +12,18 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+      - name: Install Foundry (cast)
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
       - name: Submit verifiable build
         env:
-          VERIFIABLE_BUILDS_BASE_URL: ${{ secrets.VERIFIABLE_BUILDS_BASE_URL }}
-          VERIFIABLE_BUILDS_AUTHORIZATION: ${{ secrets.VERIFIABLE_BUILDS_AUTHORIZATION }}
-          VERIFIABLE_BUILDS_EXPIRY: ${{ secrets.VERIFIABLE_BUILDS_EXPIRY }}
-          VERIFIABLE_BUILDS_ACCOUNT: ${{ secrets.VERIFIABLE_BUILDS_ACCOUNT }}
+          # Match the local test script environment.
+          API_URL: ${{ secrets.VERIFIABLE_BUILDS_BASE_URL }}
+          PRIVATE_KEY: ${{ secrets.VERIFIABLE_BUILDS_PRIVATE_KEY }}
           # Optional: JSON array string, e.g. ["sha256:abc...","sha256:def..."]
           VERIFIABLE_BUILD_DEPENDENCIES_JSON: ${{ secrets.VERIFIABLE_BUILD_DEPENDENCIES_JSON }}
           REPO_URL: https://github.com/${{ github.repository }}
-          GIT_REF: ${{ github.sha }}
         run: |
           set -euo pipefail
 
@@ -51,10 +53,19 @@ jobs:
             exit 1
           fi
 
-          : "${VERIFIABLE_BUILDS_BASE_URL:?missing secret VERIFIABLE_BUILDS_BASE_URL}"
-          : "${VERIFIABLE_BUILDS_AUTHORIZATION:?missing secret VERIFIABLE_BUILDS_AUTHORIZATION}"
-          : "${VERIFIABLE_BUILDS_EXPIRY:?missing secret VERIFIABLE_BUILDS_EXPIRY}"
-          : "${VERIFIABLE_BUILDS_ACCOUNT:?missing secret VERIFIABLE_BUILDS_ACCOUNT}"
+          # Match the local test script behavior.
+          : "${API_URL:?missing secret VERIFIABLE_BUILDS_BASE_URL}"
+          : "${PRIVATE_KEY:?missing secret VERIFIABLE_BUILDS_PRIVATE_KEY}"
+
+          PRODUCT="compute"
+          WALLET_ADDRESS="$(cast wallet address --private-key "$PRIVATE_KEY" 2>/dev/null)"
+          EXPIRY="$(($(date +%s) + 3600))"
+
+          # Domain: {name: "EigenCloud Billing API", version: "1"}
+          # Message: BillingAuth{product: "compute", expiry: <timestamp>}
+          TYPED_DATA='{"types":{"EIP712Domain":[{"name":"name","type":"string"},{"name":"version","type":"string"}],"BillingAuth":[{"name":"product","type":"string"},{"name":"expiry","type":"uint256"}]},"primaryType":"BillingAuth","domain":{"name":"EigenCloud Billing API","version":"1"},"message":{"product":"'"$PRODUCT"'","expiry":'"$EXPIRY"'}}'
+
+          SIGNATURE="$(cast wallet sign --data --private-key "$PRIVATE_KEY" "$TYPED_DATA" 2>/dev/null)"
 
           deps="${VERIFIABLE_BUILD_DEPENDENCIES_JSON:-[]}"
           if ! echo "$deps" | jq -e . >/dev/null 2>&1; then
@@ -62,20 +73,23 @@ jobs:
             exit 1
           fi
 
+          # Resolve the commit SHA the tag points to (works for annotated tags too).
+          git_ref="$(git rev-list -n 1 "$tag")"
+
           body="$(jq -n \
             --arg repo_url "$REPO_URL" \
-            --arg git_ref "$GIT_REF" \
+            --arg git_ref "$git_ref" \
             --arg dockerfile_path "$dockerfile_path" \
             --arg build_context_path "$build_context_path" \
             --argjson dependencies "$deps" \
             '{repo_url:$repo_url, git_ref:$git_ref, dockerfile_path:$dockerfile_path, build_context_path:$build_context_path, dependencies:$dependencies}')"
 
-          echo "Submitting verifiable build: client=$client tag=$tag repo=$REPO_URL ref=$GIT_REF dockerfile=$dockerfile_path context=$build_context_path"
+          echo "Submitting verifiable build: client=$client tag=$tag repo=$REPO_URL ref=$git_ref dockerfile=$dockerfile_path context=$build_context_path"
 
-          curl -fsS -X POST "${VERIFIABLE_BUILDS_BASE_URL%/}/builds" \
+          curl -fsS -X POST "${API_URL%/}/builds" \
             -H "Content-Type: application/json" \
-            -H "Authorization: ${VERIFIABLE_BUILDS_AUTHORIZATION}" \
-            -H "X-eigenx-expiry: ${VERIFIABLE_BUILDS_EXPIRY}" \
-            -H "X-Account: ${VERIFIABLE_BUILDS_ACCOUNT}" \
+            -H "Authorization: Bearer ${SIGNATURE}" \
+            -H "X-eigenx-expiry: ${EXPIRY}" \
+            -H "X-Account: ${WALLET_ADDRESS}" \
             --data "$body"
 
