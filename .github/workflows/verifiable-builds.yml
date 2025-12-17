@@ -93,9 +93,10 @@ jobs:
 
           echo "Submitting verifiable build: client=$client tag=$tag repo=$REPO_URL ref=$git_ref dockerfile=$dockerfile_path context=$build_context_path"
 
+          mapfile -t headers < <(auth_headers)
           resp="$(curl -fsS -X POST "${API_URL%/}/builds" \
             -H "Content-Type: application/json" \
-            $(auth_headers) \
+            "${headers[@]}" \
             --data "$body")"
 
           echo "$resp" | jq .
@@ -110,6 +111,7 @@ jobs:
           # Poll until completion. Refresh auth headers each attempt (expiry/signature are short-lived).
           deadline="$(($(date +%s) + 3600))" # 1 hour wall-clock timeout
           sleep_seconds=10
+          last_logs_sha=""
 
           while true; do
             now="$(date +%s)"
@@ -118,9 +120,10 @@ jobs:
               exit 1
             fi
 
+            mapfile -t headers < <(auth_headers)
             build="$(curl -fsS -X GET "${API_URL%/}/builds/${build_id}" \
               -H "Content-Type: application/json" \
-              $(auth_headers))"
+              "${headers[@]}")"
 
             status="$(echo "$build" | jq -r '.status // .build.status // empty')"
             if [[ -z "$status" ]]; then
@@ -130,6 +133,33 @@ jobs:
             fi
 
             echo "Build status: $status"
+
+            # Fetch logs for progress. Don't fail the job if logs aren't available yet.
+            mapfile -t headers < <(auth_headers)
+            logs_http_code="$(curl -sS -o /tmp/build-logs.txt -w "%{http_code}" \
+              -X GET "${API_URL%/}/builds/${build_id}/logs" \
+              -H "Content-Type: application/json" \
+              "${headers[@]}" || true)"
+
+            if [[ "$logs_http_code" == "200" ]]; then
+              logs_raw="$(cat /tmp/build-logs.txt)"
+              if echo "$logs_raw" | jq -e . >/dev/null 2>&1; then
+                logs_text="$(echo "$logs_raw" | jq -r '.logs // .')"
+              else
+                logs_text="$logs_raw"
+              fi
+
+              logs_sha="$(printf "%s" "$logs_text" | sha256sum | awk '{print $1}')"
+              if [[ -n "$logs_text" && "$logs_sha" != "$last_logs_sha" ]]; then
+                echo ""
+                echo "--- build logs (tail) ---"
+                # Keep output bounded; the full logs are available via the API.
+                printf "%s\n" "$logs_text" | tail -n 80
+                echo "--- end build logs ---"
+                echo ""
+                last_logs_sha="$logs_sha"
+              fi
+            fi
 
             if [[ "$status" == "success" ]]; then
               image_url="$(echo "$build" | jq -r '.image_url // .image.url // .image // empty')"
