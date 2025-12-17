@@ -173,6 +173,8 @@ jobs:
               echo "Digest: ${digest:-<missing>}"
               echo "Git ref: ${out_git_ref:-$git_ref}"
               echo "Provenance signature: ${prov_sig:-<missing>}"
+              echo ""
+              echo "| \`$tag\` | \`$client\` | \`${image_url:-}\` | \`${digest:-}\` | \`${out_git_ref:-$git_ref}\` | \`${prov_sig:-}\` |"
 
               if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
                 {
@@ -185,6 +187,12 @@ jobs:
                   echo "- Image: \`${image_url:-}\`"
                   echo "- Digest: \`${digest:-}\`"
                   echo "- Provenance signature: \`${prov_sig:-}\`"
+                  echo ""
+                  echo "Update \`README.md\` with the following:"
+                  echo ""
+                  echo "| Tag | Client | Image URL | Digest | Git commit | Provenance signature |"
+                  echo "| --- | ------ | --------- | ------ | ---------- | -------------------- |"
+                  echo "| \`$tag\` | \`$client\` | \`${image_url:-}\` | \`${digest:-}\` | \`${out_git_ref:-$git_ref}\` | \`${prov_sig:-}\` |"
                   echo ""
                   echo "Raw response:"
                   echo ""
