@@ -26,6 +26,15 @@ The point of publishing the source here is traceability: you can verify the exac
 - `/.github/workflows/verifiable-builds.yml` submits a build to the verifiable-build system (`POST /builds`).
 - Per-client Dockerfile and build context live in `/.github/verifiable-builds/clients.json`.
 
+### Published builds
+
+After a tag build completes successfully, copy the build output (image URL, digest, git commit, provenance signature) into the table below.
+This is a manual step and should be done as part of the release process.
+
+| Tag | Client | Image URL | Digest | Git commit | Provenance signature |
+| --- | ------ | --------- | ------ | ---------- | -------------------- |
+| (example) `tls-client-v0.0.2` | `tls-client` | `…` | `sha256:…` | `…` | `…` |
+
 ### Clients in this repo
 
 - `tls-client/` builds an image containing `/eigen/bin/tls-client`

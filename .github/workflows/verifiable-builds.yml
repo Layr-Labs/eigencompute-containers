@@ -27,6 +27,23 @@ jobs:
         run: |
           set -euo pipefail
 
+          auth_headers() {
+            local product="compute"
+            local expiry
+            expiry="$(($(date +%s) + 3600))"
+            local wallet
+            wallet="$(cast wallet address --private-key "$PRIVATE_KEY" 2>/dev/null)"
+            local typed_data
+            typed_data='{"types":{"EIP712Domain":[{"name":"name","type":"string"},{"name":"version","type":"string"}],"BillingAuth":[{"name":"product","type":"string"},{"name":"expiry","type":"uint256"}]},"primaryType":"BillingAuth","domain":{"name":"EigenCloud Billing API","version":"1"},"message":{"product":"'"$product"'","expiry":'"$expiry"'}}'
+            local sig
+            sig="$(cast wallet sign --data --private-key "$PRIVATE_KEY" "$typed_data" 2>/dev/null)"
+
+            printf '%s\n' \
+              "-H" "Authorization: Bearer $sig" \
+              "-H" "X-eigenx-expiry: $expiry" \
+              "-H" "X-Account: $wallet"
+          }
+
           tag="${GITHUB_REF_NAME}"
           client="${tag%%-v*}"
           if [[ -z "$client" || "$client" == "$tag" ]]; then
@@ -57,16 +74,6 @@ jobs:
           : "${API_URL:?missing secret VERIFIABLE_BUILDS_BASE_URL}"
           : "${PRIVATE_KEY:?missing secret VERIFIABLE_BUILDS_PRIVATE_KEY}"
 
-          PRODUCT="compute"
-          WALLET_ADDRESS="$(cast wallet address --private-key "$PRIVATE_KEY" 2>/dev/null)"
-          EXPIRY="$(($(date +%s) + 3600))"
-
-          # Domain: {name: "EigenCloud Billing API", version: "1"}
-          # Message: BillingAuth{product: "compute", expiry: <timestamp>}
-          TYPED_DATA='{"types":{"EIP712Domain":[{"name":"name","type":"string"},{"name":"version","type":"string"}],"BillingAuth":[{"name":"product","type":"string"},{"name":"expiry","type":"uint256"}]},"primaryType":"BillingAuth","domain":{"name":"EigenCloud Billing API","version":"1"},"message":{"product":"'"$PRODUCT"'","expiry":'"$EXPIRY"'}}'
-
-          SIGNATURE="$(cast wallet sign --data --private-key "$PRIVATE_KEY" "$TYPED_DATA" 2>/dev/null)"
-
           deps="${VERIFIABLE_BUILD_DEPENDENCIES_JSON:-[]}"
           if ! echo "$deps" | jq -e . >/dev/null 2>&1; then
             echo "VERIFIABLE_BUILD_DEPENDENCIES_JSON must be valid JSON (e.g. [] or [\"sha256:...\"])"
@@ -86,10 +93,86 @@ jobs:
 
           echo "Submitting verifiable build: client=$client tag=$tag repo=$REPO_URL ref=$git_ref dockerfile=$dockerfile_path context=$build_context_path"
 
-          curl -fsS -X POST "${API_URL%/}/builds" \
+          resp="$(curl -fsS -X POST "${API_URL%/}/builds" \
             -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${SIGNATURE}" \
-            -H "X-eigenx-expiry: ${EXPIRY}" \
-            -H "X-Account: ${WALLET_ADDRESS}" \
-            --data "$body"
+            $(auth_headers) \
+            --data "$body")"
+
+          echo "$resp" | jq .
+          build_id="$(echo "$resp" | jq -r '.build_id // empty')"
+          if [[ -z "$build_id" ]]; then
+            echo "Missing build_id in response"
+            exit 1
+          fi
+
+          echo "Build submitted: $build_id"
+
+          # Poll until completion. Refresh auth headers each attempt (expiry/signature are short-lived).
+          deadline="$(($(date +%s) + 3600))" # 1 hour wall-clock timeout
+          sleep_seconds=10
+
+          while true; do
+            now="$(date +%s)"
+            if (( now > deadline )); then
+              echo "Timed out waiting for build $build_id"
+              exit 1
+            fi
+
+            build="$(curl -fsS -X GET "${API_URL%/}/builds/${build_id}" \
+              -H "Content-Type: application/json" \
+              $(auth_headers))"
+
+            status="$(echo "$build" | jq -r '.status // .build.status // empty')"
+            if [[ -z "$status" ]]; then
+              echo "Build status missing; response:"
+              echo "$build" | jq .
+              status="unknown"
+            fi
+
+            echo "Build status: $status"
+
+            if [[ "$status" == "success" ]]; then
+              image_url="$(echo "$build" | jq -r '.image_url // .image.url // .image // empty')"
+              digest="$(echo "$build" | jq -r '.image_digest // .digest // .image.digest // .repo_digest // empty')"
+              prov_sig="$(echo "$build" | jq -r '.provenance_signature // .provenance.signature // .provenance_sig // empty')"
+              out_git_ref="$(echo "$build" | jq -r '.git_ref // .git.commit // .commit // empty')"
+
+              echo ""
+              echo "Build succeeded."
+              echo "Image: ${image_url:-<missing>}"
+              echo "Digest: ${digest:-<missing>}"
+              echo "Git ref: ${out_git_ref:-$git_ref}"
+              echo "Provenance signature: ${prov_sig:-<missing>}"
+
+              if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+                {
+                  echo "## Verifiable build result"
+                  echo ""
+                  echo "- Tag: \`$tag\`"
+                  echo "- Client: \`$client\`"
+                  echo "- Build ID: \`$build_id\`"
+                  echo "- Git ref: \`${out_git_ref:-$git_ref}\`"
+                  echo "- Image: \`${image_url:-}\`"
+                  echo "- Digest: \`${digest:-}\`"
+                  echo "- Provenance signature: \`${prov_sig:-}\`"
+                  echo ""
+                  echo "Raw response:"
+                  echo ""
+                  echo '```json'
+                  echo "$build" | jq .
+                  echo '```'
+                } >> "$GITHUB_STEP_SUMMARY"
+              fi
+
+              exit 0
+            fi
+
+            if [[ "$status" == "failed" || "$status" == "error" || "$status" == "canceled" || "$status" == "cancelled" ]]; then
+              echo "Build ended with status=$status"
+              echo "$build" | jq .
+              exit 1
+            fi
+
+            sleep "$sleep_seconds"
+          done
 
