@@ -1,0 +1,81 @@
+name: Verifiable Builds (submit)
+
+on:
+  push:
+    tags:
+      - "*-v*"
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Submit verifiable build
+        env:
+          VERIFIABLE_BUILDS_BASE_URL: ${{ secrets.VERIFIABLE_BUILDS_BASE_URL }}
+          VERIFIABLE_BUILDS_AUTHORIZATION: ${{ secrets.VERIFIABLE_BUILDS_AUTHORIZATION }}
+          VERIFIABLE_BUILDS_EXPIRY: ${{ secrets.VERIFIABLE_BUILDS_EXPIRY }}
+          VERIFIABLE_BUILDS_ACCOUNT: ${{ secrets.VERIFIABLE_BUILDS_ACCOUNT }}
+          # Optional: JSON array string, e.g. ["sha256:abc...","sha256:def..."]
+          VERIFIABLE_BUILD_DEPENDENCIES_JSON: ${{ secrets.VERIFIABLE_BUILD_DEPENDENCIES_JSON }}
+          REPO_URL: https://github.com/${{ github.repository }}
+          GIT_REF: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          tag="${GITHUB_REF_NAME}"
+          client="${tag%%-v*}"
+          if [[ -z "$client" || "$client" == "$tag" ]]; then
+            echo "Unable to parse client from tag: $tag (expected <client>-v<version>)"
+            exit 1
+          fi
+
+          cfg=".github/verifiable-builds/clients.json"
+          if [[ ! -f "$cfg" ]]; then
+            echo "Missing config: $cfg"
+            exit 1
+          fi
+
+          dockerfile_path="$(jq -r --arg c "$client" '.[$c].dockerfile_path // empty' "$cfg")"
+          build_context_path="$(jq -r --arg c "$client" '.[$c].build_context_path // empty' "$cfg")"
+
+          if [[ -z "$dockerfile_path" || -z "$build_context_path" ]]; then
+            echo "Unknown client '$client'. Add it to $cfg to enable verifiable builds."
+            exit 1
+          fi
+
+          if [[ ! -f "$dockerfile_path" ]]; then
+            echo "Dockerfile not found at path: $dockerfile_path"
+            exit 1
+          fi
+
+          : "${VERIFIABLE_BUILDS_BASE_URL:?missing secret VERIFIABLE_BUILDS_BASE_URL}"
+          : "${VERIFIABLE_BUILDS_AUTHORIZATION:?missing secret VERIFIABLE_BUILDS_AUTHORIZATION}"
+          : "${VERIFIABLE_BUILDS_EXPIRY:?missing secret VERIFIABLE_BUILDS_EXPIRY}"
+          : "${VERIFIABLE_BUILDS_ACCOUNT:?missing secret VERIFIABLE_BUILDS_ACCOUNT}"
+
+          deps="${VERIFIABLE_BUILD_DEPENDENCIES_JSON:-[]}"
+          if ! echo "$deps" | jq -e . >/dev/null 2>&1; then
+            echo "VERIFIABLE_BUILD_DEPENDENCIES_JSON must be valid JSON (e.g. [] or [\"sha256:...\"])"
+            exit 1
+          fi
+
+          body="$(jq -n \
+            --arg repo_url "$REPO_URL" \
+            --arg git_ref "$GIT_REF" \
+            --arg dockerfile_path "$dockerfile_path" \
+            --arg build_context_path "$build_context_path" \
+            --argjson dependencies "$deps" \
+            '{repo_url:$repo_url, git_ref:$git_ref, dockerfile_path:$dockerfile_path, build_context_path:$build_context_path, dependencies:$dependencies}')"
+
+          echo "Submitting verifiable build: client=$client tag=$tag repo=$REPO_URL ref=$GIT_REF dockerfile=$dockerfile_path context=$build_context_path"
+
+          curl -fsS -X POST "${VERIFIABLE_BUILDS_BASE_URL%/}/builds" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: ${VERIFIABLE_BUILDS_AUTHORIZATION}" \
+            -H "X-eigenx-expiry: ${VERIFIABLE_BUILDS_EXPIRY}" \
+            -H "X-Account: ${VERIFIABLE_BUILDS_ACCOUNT}" \
+            --data "$body"
+

@@ -1,0 +1,59 @@
+name: Clients CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  client-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        client:
+          - tls-client
+          - kms-client
+    defaults:
+      run:
+        working-directory: ${{ matrix.client }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.client }}/go.mod
+      - name: Unit tests
+        run: go test ./...
+
+  client-lint:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        client:
+          - tls-client
+          - kms-client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.client }}/go.mod
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: ${{ matrix.client }}
+
+  client-docker-build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        client:
+          - tls-client
+          - kms-client
+    steps:
+      - uses: actions/checkout@v4
+      - name: Docker build (artifact image)
+        run: docker build -f ${{ matrix.client }}/Dockerfile ${{ matrix.client }}
+
