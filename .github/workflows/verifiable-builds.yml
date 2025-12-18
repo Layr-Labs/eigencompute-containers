@@ -21,8 +21,6 @@ jobs:
           # Match the local test script environment.
           API_URL: ${{ secrets.VERIFIABLE_BUILDS_BASE_URL }}
           PRIVATE_KEY: ${{ secrets.VERIFIABLE_BUILDS_PRIVATE_KEY }}
-          # Optional: JSON array string, e.g. ["sha256:abc...","sha256:def..."]
-          VERIFIABLE_BUILD_DEPENDENCIES_JSON: ${{ secrets.VERIFIABLE_BUILD_DEPENDENCIES_JSON }}
           REPO_URL: https://github.com/${{ github.repository }}
         run: |
           set -euo pipefail
@@ -74,11 +72,8 @@ jobs:
           : "${API_URL:?missing secret VERIFIABLE_BUILDS_BASE_URL}"
           : "${PRIVATE_KEY:?missing secret VERIFIABLE_BUILDS_PRIVATE_KEY}"
 
-          deps="${VERIFIABLE_BUILD_DEPENDENCIES_JSON:-[]}"
-          if ! echo "$deps" | jq -e . >/dev/null 2>&1; then
-            echo "VERIFIABLE_BUILD_DEPENDENCIES_JSON must be valid JSON (e.g. [] or [\"sha256:...\"])"
-            exit 1
-          fi
+          # These repos build *dependency images* (no application layering).
+          deps="[]"
 
           # Resolve the commit SHA the tag points to (works for annotated tags too).
           git_ref="$(git rev-list -n 1 "$tag")"
@@ -89,7 +84,7 @@ jobs:
             --arg dockerfile_path "$dockerfile_path" \
             --arg build_context_path "$build_context_path" \
             --argjson dependencies "$deps" \
-            '{repo_url:$repo_url, git_ref:$git_ref, dockerfile_path:$dockerfile_path, build_context_path:$build_context_path, dependencies:$dependencies, build_type:"dependency"}')"
+            '{repo_url:$repo_url, git_ref:$git_ref, dockerfile_path:$dockerfile_path, build_context_path:$build_context_path, dependencies:$dependencies, caddyfile_path:null, build_type:"dependency"}')"
 
           echo "Submitting verifiable build: client=$client tag=$tag repo=$REPO_URL ref=$git_ref dockerfile=$dockerfile_path context=$build_context_path"
 
