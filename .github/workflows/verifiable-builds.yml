@@ -89,7 +89,7 @@ jobs:
             --arg dockerfile_path "$dockerfile_path" \
             --arg build_context_path "$build_context_path" \
             --argjson dependencies "$deps" \
-            '{repo_url:$repo_url, git_ref:$git_ref, dockerfile_path:$dockerfile_path, build_context_path:$build_context_path, dependencies:$dependencies}')"
+            '{repo_url:$repo_url, git_ref:$git_ref, dockerfile_path:$dockerfile_path, build_context_path:$build_context_path, dependencies:$dependencies, build_type:"dependency"}')"
 
           echo "Submitting verifiable build: client=$client tag=$tag repo=$REPO_URL ref=$git_ref dockerfile=$dockerfile_path context=$build_context_path"
 
