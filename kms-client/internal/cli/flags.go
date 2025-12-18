@@ -25,9 +25,22 @@ var (
 		EnvVars: []string{"LOG_LEVEL"},
 	}
 
+	AppIDFlag = &cli.StringFlag{
+		Name:    "app-id",
+		Usage:   "App ID to spoof (debug mode only)",
+		EnvVars: []string{"APP_ID"},
+	}
+
 	OutputFileFlag = &cli.StringFlag{
 		Name:  "output",
 		Usage: "Output file path to write environment variables as export KEY=\"VALUE\" lines",
+	}
+
+	UserAPIURLFlag = &cli.StringFlag{
+		Name:     "userapi-url",
+		Usage:    "User API URL to POST attestation JWT",
+		EnvVars:  []string{"USERAPI_URL"},
+		Required: true,
 	}
 )
 

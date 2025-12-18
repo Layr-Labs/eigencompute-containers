@@ -20,8 +20,10 @@ func main() {
 		Flags: []cli.Flag{
 			kmscli.KMSServerURLFlag,
 			kmscli.KMSSigningKeyFileFlag,
+			kmscli.AppIDFlag,
 			kmscli.LogLevelFlag,
 			kmscli.OutputFileFlag,
+			kmscli.UserAPIURLFlag,
 		},
 		Action: runClient,
 	}
@@ -43,7 +45,7 @@ func runClient(c *cli.Context) error {
 	}
 
 	tokenProvider := envclient.NewConfidentialSpaceTokenProvider(cfg.Logger)
-	client := envclient.NewEnvClient(cfg.Logger, tokenProvider, kmsSigningKeyBytes, cfg.ServerURL)
+	client := envclient.NewEnvClient(cfg.Logger, tokenProvider, kmsSigningKeyBytes, cfg.ServerURL, cfg.UserAPIURL)
 
 	envJSONBytes, err := client.GetEnv(ctx)
 	if err != nil {

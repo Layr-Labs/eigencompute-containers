@@ -99,14 +99,16 @@ type EnvClient struct {
 	tokenProvider AttestationTokenProvider
 	kmsSigningKey []byte
 	serverURL     string
+	userAPIURL    string
 }
 
-func NewEnvClient(logger *slog.Logger, tokenProvider AttestationTokenProvider, kmsSigningKey []byte, serverURL string) *EnvClient {
+func NewEnvClient(logger *slog.Logger, tokenProvider AttestationTokenProvider, kmsSigningKey []byte, serverURL string, userAPIURL string) *EnvClient {
 	return &EnvClient{
 		Logger:        logger,
 		tokenProvider: tokenProvider,
 		kmsSigningKey: kmsSigningKey,
 		serverURL:     serverURL,
+		userAPIURL:    userAPIURL,
 	}
 }
 
@@ -157,6 +159,41 @@ func (e *EnvClient) GetEnv(ctx context.Context) ([]byte, error) {
 	envJSONBytes, err := crypto.DecryptWithRSAOAEPAndAES256GCM(rsaPrivateKey, []byte(response.Data.EncryptedCombinedEnv))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt response: %w", err)
+	}
+
+	// Best-effort: post attestation JWT to user API with derived-addresses nonce.
+	// (Matches older kms-client behavior; failures here are non-fatal.)
+	envVars := make(map[string]string)
+	if err := json.Unmarshal(envJSONBytes, &envVars); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal env JSON: %w", err)
+	}
+
+	evmAddresses, solanaAddresses, err := crypto.DeriveAddressesFromMnemonic(envVars[types.MnemonicEnvVarName], types.NumAddressesToDerive)
+	if err != nil {
+		return nil, fmt.Errorf("failed to derive addresses from mnemonic: %w", err)
+	}
+
+	addresses := types.AddressesResponseV1{
+		EVMAddresses:    evmAddresses,
+		SolanaAddresses: solanaAddresses,
+	}
+	addressBytes, err := json.Marshal(addresses)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal derived addresses: %w", err)
+	}
+	e.Logger.Info("Derived addresses from mnemonic", "addresses", string(addressBytes))
+
+	addressesNonce := crypto.CalculateSignableDigest(crypto.AppDerivedAddressesHeader, addressBytes)
+	uploadJWT, err := e.tokenProvider.GetToken(ctx, types.DashboardJWTAudience, hex.EncodeToString(addressesNonce))
+	if err != nil {
+		e.Logger.Error("Failed to get attestation token for user API", "error", err)
+	} else {
+		e.Logger.Info("Posting JWT to user API", "url", e.userAPIURL)
+		if err := e.postJWTToUserAPI(ctx, uploadJWT); err != nil {
+			e.Logger.Error("Failed to post JWT to user API after retries", "error", err)
+		} else {
+			e.Logger.Info("Successfully posted JWT to user API")
+		}
 	}
 
 	return envJSONBytes, nil
@@ -231,6 +268,53 @@ func (e *EnvClient) sendRequest(ctx context.Context, envRequest types.EnvRequest
 	}
 
 	return &signedResponse, nil
+}
+
+func (e *EnvClient) postJWTToUserAPI(ctx context.Context, jwt string) error {
+	payload := map[string]string{"jwt": jwt}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal JWT payload: %w", err)
+	}
+
+	url := e.userAPIURL + "/attestation"
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	operation := func() ([]byte, error) {
+		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(payloadBytes))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+
+		responseBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+
+		if resp.StatusCode >= 500 {
+			return nil, fmt.Errorf("server error %d: %s", resp.StatusCode, string(responseBody))
+		}
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+			return nil, backoff.Permanent(fmt.Errorf("client error %d: %s", resp.StatusCode, string(responseBody)))
+		}
+
+		e.Logger.Debug("User API response", "status", resp.StatusCode, "body", string(responseBody))
+		return responseBody, nil
+	}
+
+	_, err = e.retryHTTPRequest(ctx, "Posting JWT to user API...", operation)
+	if err != nil {
+		return fmt.Errorf("failed to post JWT after retries: %w", err)
+	}
+	return nil
 }
 
 
