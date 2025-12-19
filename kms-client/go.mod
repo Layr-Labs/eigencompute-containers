@@ -1,8 +1,6 @@
 module github.com/Layr-Labs/eigenx-kms-client
 
-go 1.23.0
-
-toolchain go1.23.4
+go 1.24.0
 
 require (
 	github.com/cenkalti/backoff/v5 v5.0.0
@@ -12,18 +10,18 @@ require (
 	github.com/miguelmota/go-ethereum-hdwallet v0.1.3
 	github.com/mr-tron/base58 v1.2.0
 	github.com/urfave/cli/v2 v2.27.7
-	golang.org/x/crypto v0.41.0
+	golang.org/x/crypto v0.45.0
 )
 
 require (
 	filippo.io/edwards25519 v1.0.0-rc.1 // indirect
 	github.com/bits-and-blooms/bitset v1.20.0 // indirect
 	github.com/blendle/zapdriver v1.3.1 // indirect
-	github.com/btcsuite/btcd v0.24.0 // indirect
+	github.com/btcsuite/btcd v0.24.2 // indirect
 	github.com/btcsuite/btcd/btcec/v2 v2.2.0 // indirect
 	github.com/btcsuite/btcd/btcutil v1.1.5 // indirect
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0 // indirect
-	github.com/consensys/gnark-crypto v0.18.0 // indirect
+	github.com/consensys/gnark-crypto v0.18.1 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
 	github.com/crate-crypto/go-eth-kzg v1.3.0 // indirect
 	github.com/crate-crypto/go-ipa v0.0.0-20240724233137-53bbb0ceb27a // indirect
@@ -61,6 +59,6 @@ require (
 	go.uber.org/multierr v1.6.0 // indirect
 	go.uber.org/zap v1.21.0 // indirect
 	golang.org/x/sync v0.12.0 // indirect
-	golang.org/x/sys v0.35.0 // indirect
-	golang.org/x/term v0.34.0 // indirect
+	golang.org/x/sys v0.38.0 // indirect
+	golang.org/x/term v0.37.0 // indirect
 )
