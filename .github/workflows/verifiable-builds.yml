@@ -1,0 +1,211 @@
+name: Submit Verifiable Builds
+
+on:
+  push:
+    tags:
+      - "*-v*"
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Foundry (cast)
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Submit verifiable build
+        env:
+          # Match the local test script environment.
+          API_URL: ${{ secrets.VERIFIABLE_BUILDS_BASE_URL }}
+          PRIVATE_KEY: ${{ secrets.VERIFIABLE_BUILDS_PRIVATE_KEY }}
+          REPO_URL: https://github.com/${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          auth_headers() {
+            local product="compute"
+            local expiry
+            expiry="$(($(date +%s) + 3600))"
+            local wallet
+            wallet="$(cast wallet address --private-key "$PRIVATE_KEY" 2>/dev/null)"
+            local typed_data
+            typed_data='{"types":{"EIP712Domain":[{"name":"name","type":"string"},{"name":"version","type":"string"}],"BillingAuth":[{"name":"product","type":"string"},{"name":"expiry","type":"uint256"}]},"primaryType":"BillingAuth","domain":{"name":"EigenCloud Billing API","version":"1"},"message":{"product":"'"$product"'","expiry":'"$expiry"'}}'
+            local sig
+            sig="$(cast wallet sign --data --private-key "$PRIVATE_KEY" "$typed_data" 2>/dev/null)"
+
+            printf '%s\n' \
+              "-H" "Authorization: Bearer $sig" \
+              "-H" "X-eigenx-expiry: $expiry" \
+              "-H" "X-Account: $wallet"
+          }
+
+          tag="${GITHUB_REF_NAME}"
+          client="${tag%%-v*}"
+          if [[ -z "$client" || "$client" == "$tag" ]]; then
+            echo "Unable to parse client from tag: $tag (expected <client>-v<version>)"
+            exit 1
+          fi
+
+          cfg=".github/verifiable-builds/clients.json"
+          if [[ ! -f "$cfg" ]]; then
+            echo "Missing config: $cfg"
+            exit 1
+          fi
+
+          dockerfile_path="$(jq -r --arg c "$client" '.[$c].dockerfile_path // empty' "$cfg")"
+          build_context_path="$(jq -r --arg c "$client" '.[$c].build_context_path // empty' "$cfg")"
+
+          if [[ -z "$dockerfile_path" || -z "$build_context_path" ]]; then
+            echo "Unknown client '$client'. Add it to $cfg to enable verifiable builds."
+            exit 1
+          fi
+
+          if [[ ! -f "$dockerfile_path" ]]; then
+            echo "Dockerfile not found at path: $dockerfile_path"
+            exit 1
+          fi
+
+          # Match the local test script behavior.
+          : "${API_URL:?missing secret VERIFIABLE_BUILDS_BASE_URL}"
+          : "${PRIVATE_KEY:?missing secret VERIFIABLE_BUILDS_PRIVATE_KEY}"
+
+          # These repos build *dependency images* (no application layering).
+          deps="[]"
+
+          # Resolve the commit SHA the tag points to (works for annotated tags too).
+          git_ref="$(git rev-list -n 1 "$tag")"
+
+          body="$(jq -n \
+            --arg repo_url "$REPO_URL" \
+            --arg git_ref "$git_ref" \
+            --arg dockerfile_path "$dockerfile_path" \
+            --arg build_context_path "$build_context_path" \
+            --argjson dependencies "$deps" \
+            '{repo_url:$repo_url, git_ref:$git_ref, dockerfile_path:$dockerfile_path, build_context_path:$build_context_path, dependencies:$dependencies, caddyfile_path:null, build_type:"dependency"}')"
+
+          echo "Submitting verifiable build: client=$client tag=$tag repo=$REPO_URL ref=$git_ref dockerfile=$dockerfile_path context=$build_context_path"
+
+          mapfile -t headers < <(auth_headers)
+          resp="$(curl -fsS -X POST "${API_URL%/}/builds" \
+            -H "Content-Type: application/json" \
+            "${headers[@]}" \
+            --data "$body")"
+
+          echo "$resp" | jq .
+          build_id="$(echo "$resp" | jq -r '.build_id // empty')"
+          if [[ -z "$build_id" ]]; then
+            echo "Missing build_id in response"
+            exit 1
+          fi
+
+          echo "Build submitted: $build_id"
+
+          # Poll until completion. Refresh auth headers each attempt (expiry/signature are short-lived).
+          deadline="$(($(date +%s) + 3600))" # 1 hour wall-clock timeout
+          sleep_seconds=10
+          last_logs_sha=""
+
+          while true; do
+            now="$(date +%s)"
+            if (( now > deadline )); then
+              echo "Timed out waiting for build $build_id"
+              exit 1
+            fi
+
+            mapfile -t headers < <(auth_headers)
+            build="$(curl -fsS -X GET "${API_URL%/}/builds/${build_id}" \
+              -H "Content-Type: application/json" \
+              "${headers[@]}")"
+
+            status="$(echo "$build" | jq -r '.status // .build.status // empty')"
+            if [[ -z "$status" ]]; then
+              echo "Build status missing; response:"
+              echo "$build" | jq .
+              status="unknown"
+            fi
+
+            echo "Build status: $status"
+
+            # Fetch logs for progress. Don't fail the job if logs aren't available yet.
+            mapfile -t headers < <(auth_headers)
+            logs_http_code="$(curl -sS -o /tmp/build-logs.txt -w "%{http_code}" \
+              -X GET "${API_URL%/}/builds/${build_id}/logs" \
+              -H "Content-Type: application/json" \
+              "${headers[@]}" || true)"
+
+            if [[ "$logs_http_code" == "200" ]]; then
+              logs_raw="$(cat /tmp/build-logs.txt)"
+              if echo "$logs_raw" | jq -e . >/dev/null 2>&1; then
+                logs_text="$(echo "$logs_raw" | jq -r '.logs // .')"
+              else
+                logs_text="$logs_raw"
+              fi
+
+              logs_sha="$(printf "%s" "$logs_text" | sha256sum | awk '{print $1}')"
+              if [[ -n "$logs_text" && "$logs_sha" != "$last_logs_sha" ]]; then
+                echo ""
+                echo "--- build logs (tail) ---"
+                # Keep output bounded; the full logs are available via the API.
+                printf "%s\n" "$logs_text" | tail -n 80
+                echo "--- end build logs ---"
+                echo ""
+                last_logs_sha="$logs_sha"
+              fi
+            fi
+
+            if [[ "$status" == "success" ]]; then
+              image_url="$(echo "$build" | jq -r '.image_url // .image.url // .image // empty')"
+              digest="$(echo "$build" | jq -r '.image_digest // .digest // .image.digest // .repo_digest // empty')"
+              prov_sig="$(echo "$build" | jq -r '.provenance_signature // .provenance.signature // .provenance_sig // empty')"
+              out_git_ref="$(echo "$build" | jq -r '.git_ref // .git.commit // .commit // empty')"
+
+              echo ""
+              echo "Build succeeded."
+              echo "Image: ${image_url:-<missing>}"
+              echo "Digest: ${digest:-<missing>}"
+              echo "Git ref: ${out_git_ref:-$git_ref}"
+              echo "Provenance signature: ${prov_sig:-<missing>}"
+              echo ""
+              echo "| \`$tag\` | \`$client\` | \`${image_url:-}\` | \`${digest:-}\` | \`${out_git_ref:-$git_ref}\` | \`${prov_sig:-}\` |"
+
+              if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+                {
+                  echo "## Verifiable build result"
+                  echo ""
+                  echo "- Tag: \`$tag\`"
+                  echo "- Client: \`$client\`"
+                  echo "- Build ID: \`$build_id\`"
+                  echo "- Git ref: \`${out_git_ref:-$git_ref}\`"
+                  echo "- Image: \`${image_url:-}\`"
+                  echo "- Digest: \`${digest:-}\`"
+                  echo "- Provenance signature: \`${prov_sig:-}\`"
+                  echo ""
+                  echo "Update \`README.md\` with the following:"
+                  echo ""
+                  echo "| Tag | Client | Image URL | Digest | Git commit | Provenance signature |"
+                  echo "| --- | ------ | --------- | ------ | ---------- | -------------------- |"
+                  echo "| \`$tag\` | \`$client\` | \`${image_url:-}\` | \`${digest:-}\` | \`${out_git_ref:-$git_ref}\` | \`${prov_sig:-}\` |"
+                  echo ""
+                  echo "Raw response:"
+                  echo ""
+                  echo '```json'
+                  echo "$build" | jq .
+                  echo '```'
+                } >> "$GITHUB_STEP_SUMMARY"
+              fi
+
+              exit 0
+            fi
+
+            if [[ "$status" == "failed" || "$status" == "error" || "$status" == "canceled" || "$status" == "cancelled" ]]; then
+              echo "Build ended with status=$status"
+              echo "$build" | jq .
+              exit 1
+            fi
+
+            sleep "$sleep_seconds"
+          done
+

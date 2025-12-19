@@ -1,0 +1,11 @@
+{
+  "tls-client": {
+    "dockerfile_path": "tls-client/Dockerfile",
+    "build_context_path": "tls-client"
+  },
+  "kms-client": {
+    "dockerfile_path": "kms-client/Dockerfile",
+    "build_context_path": "kms-client"
+  }
+}
+

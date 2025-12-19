@@ -1,0 +1,59 @@
+name: Clients CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  client-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        client:
+          - tls-client
+          - kms-client
+    defaults:
+      run:
+        working-directory: ${{ matrix.client }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.client }}/go.mod
+      - name: Unit tests
+        run: go test ./...
+
+  client-lint:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        client:
+          - tls-client
+          - kms-client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.client }}/go.mod
+      - name: Install golangci-lint (built with this Go toolchain)
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+      - name: golangci-lint
+        run: golangci-lint run
+        working-directory: ${{ matrix.client }}
+
+  client-docker-build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        client:
+          - tls-client
+          - kms-client
+    steps:
+      - uses: actions/checkout@v4
+      - name: Docker build (artifact image)
+        run: docker build -f ${{ matrix.client }}/Dockerfile ${{ matrix.client }}
+
