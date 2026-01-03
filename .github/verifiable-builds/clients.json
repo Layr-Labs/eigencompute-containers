@@ -6,6 +6,10 @@
   "kms-client": {
     "dockerfile_path": "kms-client/Dockerfile",
     "build_context_path": "kms-client"
+  },
+  "vtls-agent": {
+    "dockerfile_path": "vtls-agent/Dockerfile",
+    "build_context_path": "vtls-agent"
   }
 }
 
