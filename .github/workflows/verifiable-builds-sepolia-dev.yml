@@ -1,4 +1,4 @@
-name: Submit Verifiable Builds
+name: Submit Verifiable Builds (sepolia-dev)
 
 on:
   push:
@@ -18,8 +18,7 @@ jobs:
           version: stable
       - name: Submit verifiable build
         env:
-          # Match the local test script environment.
-          API_URL: ${{ secrets.VERIFIABLE_BUILDS_BASE_URL }}
+          API_URL: ${{ secrets.VERIFIABLE_BUILDS_BASE_URL_SEPOLIA_DEV }}
           PRIVATE_KEY: ${{ secrets.VERIFIABLE_BUILDS_PRIVATE_KEY }}
           REPO_URL: https://github.com/${{ github.repository }}
         run: |
@@ -68,14 +67,11 @@ jobs:
             exit 1
           fi
 
-          # Match the local test script behavior.
-          : "${API_URL:?missing secret VERIFIABLE_BUILDS_BASE_URL}"
+          : "${API_URL:?missing secret VERIFIABLE_BUILDS_BASE_URL_SEPOLIA_DEV}"
           : "${PRIVATE_KEY:?missing secret VERIFIABLE_BUILDS_PRIVATE_KEY}"
 
-          # These repos build *dependency images* (no application layering).
           deps="[]"
 
-          # Resolve the commit SHA the tag points to (works for annotated tags too).
           git_ref="$(git rev-list -n 1 "$tag")"
 
           body="$(jq -n \
@@ -86,7 +82,7 @@ jobs:
             --argjson dependencies "$deps" \
             '{repo_url:$repo_url, git_ref:$git_ref, dockerfile_path:$dockerfile_path, build_context_path:$build_context_path, dependencies:$dependencies, caddyfile_path:null, build_type:"dependency"}')"
 
-          echo "Submitting verifiable build: client=$client tag=$tag repo=$REPO_URL ref=$git_ref dockerfile=$dockerfile_path context=$build_context_path"
+          echo "Submitting verifiable build (sepolia-dev): client=$client tag=$tag repo=$REPO_URL ref=$git_ref dockerfile=$dockerfile_path context=$build_context_path"
 
           mapfile -t headers < <(auth_headers)
           resp="$(curl -fsS -X POST "${API_URL%/}/builds" \
@@ -103,8 +99,7 @@ jobs:
 
           echo "Build submitted: $build_id"
 
-          # Poll until completion. Refresh auth headers each attempt (expiry/signature are short-lived).
-          deadline="$(($(date +%s) + 3600))" # 1 hour wall-clock timeout
+          deadline="$(($(date +%s) + 3600))"
           sleep_seconds=10
           last_logs_sha=""
 
@@ -129,7 +124,6 @@ jobs:
 
             echo "Build status: $status"
 
-            # Fetch logs for progress. Don't fail the job if logs aren't available yet.
             mapfile -t headers < <(auth_headers)
             logs_http_code="$(curl -sS -o /tmp/build-logs.txt -w "%{http_code}" \
               -X GET "${API_URL%/}/builds/${build_id}/logs" \
@@ -148,7 +142,6 @@ jobs:
               if [[ -n "$logs_text" && "$logs_sha" != "$last_logs_sha" ]]; then
                 echo ""
                 echo "--- build logs (tail) ---"
-                # Keep output bounded; the full logs are available via the API.
                 printf "%s\n" "$logs_text" | tail -n 80
                 echo "--- end build logs ---"
                 echo ""
@@ -163,7 +156,7 @@ jobs:
               out_git_ref="$(echo "$build" | jq -r '.git_ref // .git.commit // .commit // empty')"
 
               echo ""
-              echo "Build succeeded."
+              echo "Build succeeded (sepolia-dev)."
               echo "Image: ${image_url:-<missing>}"
               echo "Digest: ${digest:-<missing>}"
               echo "Git ref: ${out_git_ref:-$git_ref}"
@@ -173,7 +166,7 @@ jobs:
 
               if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
                 {
-                  echo "## Verifiable build result"
+                  echo "## Verifiable build result (sepolia-dev)"
                   echo ""
                   echo "- Tag: \`$tag\`"
                   echo "- Client: \`$client\`"
@@ -183,17 +176,9 @@ jobs:
                   echo "- Digest: \`${digest:-}\`"
                   echo "- Provenance signature: \`${prov_sig:-}\`"
                   echo ""
-                  echo "Update \`README.md\` with the following:"
-                  echo ""
                   echo "| Tag | Client | Image URL | Digest | Git commit | Provenance signature |"
                   echo "| --- | ------ | --------- | ------ | ---------- | -------------------- |"
                   echo "| \`$tag\` | \`$client\` | \`${image_url:-}\` | \`${digest:-}\` | \`${out_git_ref:-$git_ref}\` | \`${prov_sig:-}\` |"
-                  echo ""
-                  echo "Raw response:"
-                  echo ""
-                  echo '```json'
-                  echo "$build" | jq .
-                  echo '```'
                 } >> "$GITHUB_STEP_SUMMARY"
               fi
 
@@ -208,4 +193,3 @@ jobs:
 
             sleep "$sleep_seconds"
           done
-
