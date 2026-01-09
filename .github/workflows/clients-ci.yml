@@ -52,6 +52,7 @@ jobs:
         client:
           - tls-client
           - kms-client
+          - eigenx-kms-client
     steps:
       - uses: actions/checkout@v4
       - name: Docker build (artifact image)
