@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	kmscli "github.com/Layr-Labs/eigenx-kms-go/kms-client/internal/cli"
-	"github.com/Layr-Labs/eigenx-kms-go/kms-client/pkg/envclient"
+	kmscli "github.com/Layr-Labs/eigencompute-containers/eigenx-kms-client/internal/cli"
+	"github.com/Layr-Labs/eigencompute-containers/eigenx-kms-client/pkg/envclient"
 	"github.com/urfave/cli/v2"
 )
 

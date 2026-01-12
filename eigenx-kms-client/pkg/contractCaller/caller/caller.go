@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/Layr-Labs/eigencompute-containers/eigenx-kms-client/pkg/types"
 	appcontrollerV1 "github.com/Layr-Labs/eigenx-contracts/pkg/bindings/v1/AppController"
-	"github.com/Layr-Labs/eigenx-kms-go/kms-client/pkg/contractCaller"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -98,23 +98,23 @@ func (cc *ContractCaller) FilterAppUpgraded(apps []common.Address, filterOpts *b
 	return iterator, nil
 }
 
-func (cc *ContractCaller) GetLatestRelease(ctx context.Context, appID string) ([32]byte, contractCaller.Env, []byte, error) {
+func (cc *ContractCaller) GetLatestRelease(ctx context.Context, appID string) ([32]byte, types.Env, []byte, error) {
 	cc.logger.Sugar().Debugw("Getting latest release", "app_id", appID)
 
 	appAddress := common.HexToAddress(appID)
-	cc.logger.Sugar().Debug("Fetching app latest release block number", "app_address", appAddress)
+	cc.logger.Sugar().Debugw("Fetching app latest release block number", "app_address", appAddress)
 	latestReleaseBlockNumber, err := cc.GetAppLatestReleaseBlockNumber(appAddress, &bind.CallOpts{Context: ctx})
 	if err != nil {
-		return [32]byte{}, contractCaller.Env{}, nil, fmt.Errorf("failed to get app latest release block number: %v", err)
+		return [32]byte{}, types.Env{}, nil, fmt.Errorf("failed to get app latest release block number: %v", err)
 	}
-	cc.logger.Sugar().Debug("App latest release block number fetched successfully", "block_number", latestReleaseBlockNumber)
+	cc.logger.Sugar().Debugw("App latest release block number fetched successfully", "block_number", latestReleaseBlockNumber)
 
 	// get the latest release deployed at the block number
 	releaseBlockNumberUint64 := uint64(latestReleaseBlockNumber)
 	cc.logger.Sugar().Debug("Filtering app upgraded events", "block_number", releaseBlockNumberUint64, "app_address", appAddress)
 	appUpgrades, err := cc.appController.FilterAppUpgraded(&bind.FilterOpts{Context: ctx, Start: releaseBlockNumberUint64, End: &releaseBlockNumberUint64}, []common.Address{appAddress})
 	if err != nil {
-		return [32]byte{}, contractCaller.Env{}, nil, fmt.Errorf("failed to filter app upgraded: %v", err)
+		return [32]byte{}, types.Env{}, nil, fmt.Errorf("failed to filter app upgraded: %v", err)
 	}
 	cc.logger.Sugar().Debug("App upgraded events filtered successfully")
 
@@ -129,21 +129,21 @@ func (cc *ContractCaller) GetLatestRelease(ctx context.Context, appID string) ([
 		}
 	}
 	if lastAppUpgrade == nil {
-		return [32]byte{}, contractCaller.Env{}, nil, fmt.Errorf("no app upgrade found for app %s at block %d", appID, releaseBlockNumberUint64)
+		return [32]byte{}, types.Env{}, nil, fmt.Errorf("no app upgrade found for app %s at block %d", appID, releaseBlockNumberUint64)
 	}
 
 	release := lastAppUpgrade.Release
 	cc.logger.Sugar().Debug("Found app upgraded event", "app_id", appID, "release_id", lastAppUpgrade.RmsReleaseId, "block", lastAppUpgrade.Raw.BlockNumber)
 
 	if len(release.RmsRelease.Artifacts) != 1 {
-		return [32]byte{}, contractCaller.Env{}, nil, fmt.Errorf("expected 1 artifact, got %d", len(release.RmsRelease.Artifacts))
+		return [32]byte{}, types.Env{}, nil, fmt.Errorf("expected 1 artifact, got %d", len(release.RmsRelease.Artifacts))
 	}
 	cc.logger.Sugar().Debug("Release retrieved successfully", "app_id", appID, "artifact_digest", fmt.Sprintf("%x", release.RmsRelease.Artifacts[0].Digest))
 
-	publicEnv := contractCaller.Env{}
+	publicEnv := types.Env{}
 	err = json.Unmarshal(release.PublicEnv, &publicEnv)
 	if err != nil {
-		return [32]byte{}, contractCaller.Env{}, nil, fmt.Errorf("failed to unmarshal env: %v", err)
+		return [32]byte{}, types.Env{}, nil, fmt.Errorf("failed to unmarshal env: %v", err)
 	}
 	cc.logger.Sugar().Debug("Latest release data prepared", "app_id", appID, "public_env_vars_count", len(publicEnv))
 

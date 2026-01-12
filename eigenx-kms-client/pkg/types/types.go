@@ -40,4 +40,4 @@ type AddressesResponseV1 struct {
 	SolanaAddresses []SolanaAddressAndDerivationPath `json:"solanaAddresses"`
 }
 
-
+type Env map[string]string
