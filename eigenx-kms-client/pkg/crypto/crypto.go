@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/Layr-Labs/eigenx-kms-go/kms-client/pkg/types"
+	"github.com/Layr-Labs/eigencompute-containers/eigenx-kms-client/pkg/types"
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwe"
 	hdwallet "github.com/miguelmota/go-ethereum-hdwallet"
