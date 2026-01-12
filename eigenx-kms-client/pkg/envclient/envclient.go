@@ -12,8 +12,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Layr-Labs/eigenx-kms-go/kms-client/pkg/crypto"
-	"github.com/Layr-Labs/eigenx-kms-go/kms-client/pkg/types"
+	"github.com/Layr-Labs/eigencompute-containers/eigenx-kms-client/pkg/crypto"
+	"github.com/Layr-Labs/eigencompute-containers/eigenx-kms-client/pkg/types"
 	"github.com/cenkalti/backoff/v5"
 )
 
