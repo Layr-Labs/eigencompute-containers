@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net"
 	"net/http"
 	"time"
@@ -15,6 +14,7 @@ import (
 	"github.com/Layr-Labs/eigencompute-containers/eigenx-kms-client/pkg/crypto"
 	"github.com/Layr-Labs/eigencompute-containers/eigenx-kms-client/pkg/types"
 	"github.com/cenkalti/backoff/v5"
+	"go.uber.org/zap"
 )
 
 const (
@@ -35,10 +35,10 @@ type AttestationTokenProvider interface {
 // Reference:
 // https://cloud.google.com/confidential-computing/confidential-space/docs/connect-external-resources#retrieve_attestation_tokens
 type ConfidentialSpaceTokenProvider struct {
-	logger *slog.Logger
+	logger *zap.Logger
 }
 
-func NewConfidentialSpaceTokenProvider(logger *slog.Logger) *ConfidentialSpaceTokenProvider {
+func NewConfidentialSpaceTokenProvider(logger *zap.Logger) *ConfidentialSpaceTokenProvider {
 	return &ConfidentialSpaceTokenProvider{logger: logger}
 }
 
@@ -68,7 +68,7 @@ func (p *ConfidentialSpaceTokenProvider) GetToken(ctx context.Context, audience,
 		},
 	}
 
-	p.logger.Debug("Requesting attestation token", "audience", audience)
+	p.logger.Sugar().Debugw("Requesting attestation token", "audience", audience)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", attestationTokenURL, bytes.NewReader(reqBody))
 	if err != nil {
@@ -95,14 +95,14 @@ func (p *ConfidentialSpaceTokenProvider) GetToken(ctx context.Context, audience,
 }
 
 type EnvClient struct {
-	Logger        *slog.Logger
+	Logger        *zap.Logger
 	tokenProvider AttestationTokenProvider
 	kmsSigningKey []byte
 	serverURL     string
 	userAPIURL    string
 }
 
-func NewEnvClient(logger *slog.Logger, tokenProvider AttestationTokenProvider, kmsSigningKey []byte, serverURL string, userAPIURL string) *EnvClient {
+func NewEnvClient(logger *zap.Logger, tokenProvider AttestationTokenProvider, kmsSigningKey []byte, serverURL string, userAPIURL string) *EnvClient {
 	return &EnvClient{
 		Logger:        logger,
 		tokenProvider: tokenProvider,
@@ -114,7 +114,7 @@ func NewEnvClient(logger *slog.Logger, tokenProvider AttestationTokenProvider, k
 
 func (e *EnvClient) GetEnv(ctx context.Context) ([]byte, error) {
 	// Generate RSA key pair on the fly for envelope encryption.
-	e.Logger.Info("Generating RSA key pair")
+	e.Logger.Sugar().Infow("Generating RSA key pair")
 	rsaPrivateKeyPEM, rsaPublicKeyPEM, err := crypto.GenerateRSAKeyPair()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate RSA key pair: %w", err)
@@ -124,13 +124,13 @@ func (e *EnvClient) GetEnv(ctx context.Context) ([]byte, error) {
 	rsaKeyHash := crypto.CalculateSignableDigest(crypto.EnvRequestRSAKeyHeader, rsaPublicKeyPEM)
 	rsaKeyHashHex := hex.EncodeToString(rsaKeyHash)
 
-	e.Logger.Info("Requesting attestation token")
+	e.Logger.Sugar().Infow("Requesting attestation token")
 	jwt, err := e.tokenProvider.GetToken(ctx, types.KMSJWTAudience, rsaKeyHashHex)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get attestation token: %w", err)
 	}
 
-	e.Logger.Debug("Requesting env from server", "url", e.serverURL)
+	e.Logger.Sugar().Debugw("Requesting env from server", "url", e.serverURL)
 	response, err := e.sendRequest(ctx, types.EnvRequestV2{
 		JWTWithAttestedRSAKey: jwt,
 		RSAKeyPEM:             string(rsaPublicKeyPEM),
@@ -181,18 +181,18 @@ func (e *EnvClient) GetEnv(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal derived addresses: %w", err)
 	}
-	e.Logger.Info("Derived addresses from mnemonic", "addresses", string(addressBytes))
+	e.Logger.Sugar().Infow("Derived addresses from mnemonic", "addresses", string(addressBytes))
 
 	addressesNonce := crypto.CalculateSignableDigest(crypto.AppDerivedAddressesHeader, addressBytes)
 	uploadJWT, err := e.tokenProvider.GetToken(ctx, types.DashboardJWTAudience, hex.EncodeToString(addressesNonce))
 	if err != nil {
-		e.Logger.Error("Failed to get attestation token for user API", "error", err)
+		e.Logger.Sugar().Errorw("Failed to get attestation token for user API", "error", err)
 	} else {
-		e.Logger.Info("Posting JWT to user API", "url", e.userAPIURL)
+		e.Logger.Sugar().Infow("Posting JWT to user API", "url", e.userAPIURL)
 		if err := e.postJWTToUserAPI(ctx, uploadJWT); err != nil {
-			e.Logger.Error("Failed to post JWT to user API after retries", "error", err)
+			e.Logger.Sugar().Errorw("Failed to post JWT to user API after retries", "error", err)
 		} else {
-			e.Logger.Info("Successfully posted JWT to user API")
+			e.Logger.Sugar().Infow("Successfully posted JWT to user API")
 		}
 	}
 
@@ -202,7 +202,7 @@ func (e *EnvClient) GetEnv(ctx context.Context) ([]byte, error) {
 func (e *EnvClient) retryHTTPRequest(ctx context.Context, logMessage string, operation func() ([]byte, error)) ([]byte, error) {
 	retries := 0
 	wrappedOperation := func() ([]byte, error) {
-		e.Logger.Info(logMessage, "retries", retries)
+		e.Logger.Sugar().Infow(logMessage, "retries", retries)
 		retries++
 		return operation()
 	}
@@ -306,7 +306,7 @@ func (e *EnvClient) postJWTToUserAPI(ctx context.Context, jwt string) error {
 			return nil, backoff.Permanent(fmt.Errorf("client error %d: %s", resp.StatusCode, string(responseBody)))
 		}
 
-		e.Logger.Debug("User API response", "status", resp.StatusCode, "body", string(responseBody))
+		e.Logger.Sugar().Debugw("User API response", "status", resp.StatusCode, "body", string(responseBody))
 		return responseBody, nil
 	}
 
