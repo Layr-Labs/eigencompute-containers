@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/Layr-Labs/eigencompute-containers/eigenx-kms-client/pkg/contractCaller"
 	"github.com/Layr-Labs/eigencompute-containers/eigenx-kms-client/pkg/types"
 	"github.com/Layr-Labs/eigenx-kms-go/pkg/attestation"
+	"github.com/Layr-Labs/eigenx-kms-go/pkg/crypto"
+	kmsTypes "github.com/Layr-Labs/eigenx-kms-go/pkg/types"
 	"github.com/lestrrat-go/jwx/v3/jwe"
 	"go.uber.org/zap"
 )
@@ -69,6 +72,25 @@ func (em *EnvManager) GetEnvironmentForLatestRelease(ctx context.Context, claims
 	}
 
 	return publicEnv, encryptedEnvBytes, nil
+}
+
+// DecryptSecretEnv decrypts the encrypted environment variables using the recovered private key.
+// @param appId the application ID.
+// @param recoveredPrivateKey the recovered private key for decryption.
+// @param encryptedEnv the encrypted environment variables in bytes.
+// @returns the decrypted private environment variables, or an error if decryption fails.
+func (em *EnvManager) DecryptSecretEnv(appId string, recoveredPrivateKey kmsTypes.G1Point, encryptedEnv []byte) (types.Env, error) {
+	decryptedData, err := crypto.DecryptForApp(appId, recoveredPrivateKey, encryptedEnv)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt secret env: %v", err)
+	}
+
+	privateEnv := types.Env{}
+	err = json.Unmarshal(decryptedData, &privateEnv)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal decrypted env JSON: %v", err)
+	}
+	return privateEnv, nil
 }
 
 func checkAuthorization(claims *attestation.AttestationClaims, expectedDigest [32]byte) error {
