@@ -4,6 +4,39 @@
 
 Update `eigenx-kms-client` to use the `pkg/clients/kmsClient.Client` from `eigenx-kms-go` for distributed threshold cryptography. The client will maintain the same CLI interface as the old `kms-client` (single command that outputs environment variables) but leverage the new distributed KMS implementation using IBE (Identity-Based Encryption) and threshold signatures.
 
+## Prerequisites & Dependencies
+
+### eigenx-kms-go Requirements
+
+✅ **All required functionality exists in eigenx-kms-go** - No changes needed to the dependency.
+
+Verified functionality:
+- `encryption.GenerateKeyPair(bits int)` - RSA key pair generation (use 4096 bits to match old kms-client)
+- `kmsClient.Client` - Distributed KMS client with threshold cryptography
+- `attestation.NewAttestationVerifier` - GCP attestation verification
+- `crypto.DecryptForApp` - IBE decryption
+
+### Pattern Matching with Old kms-client
+
+All implementations will follow the exact patterns from `/kms-client`:
+
+1. **RSA Key Generation**: Use 4096-bit keys (not 2048)
+   - Old: `crypto.GenerateRSAKeyPair()` → 4096 bits
+   - New: `encryption.GenerateKeyPair(4096)` → 4096 bits
+
+2. **Address Derivation**: Use structured types `[]types.EVMAddressAndDerivationPath`, `[]types.SolanaAddressAndDerivationPath`
+   - Old: Returns structured types, marshals to `AddressesResponseV1`
+   - New: Same pattern - keep structured types throughout
+
+3. **Nonce Calculation**:
+   - For env request: `crypto.CalculateSignableDigest(crypto.EnvRequestRSAKeyHeader, rsaPublicKeyPEM)`
+   - For addresses: Marshal `AddressesResponseV1` to JSON, then `crypto.CalculateSignableDigest(crypto.AppDerivedAddressesHeader, addressJSON)`
+
+4. **Constants**: All exist in `eigenx-kms-client/pkg/crypto`:
+   - ✅ `EnvRequestRSAKeyHeader`
+   - ✅ `AppDerivedAddressesHeader`
+   - ✅ `NumAddressesToDerive = 5`
+
 ## Current State
 
 ### Already Implemented in eigenx-kms-client
@@ -217,6 +250,7 @@ import (
 	kmscli "github.com/Layr-Labs/eigencompute-containers/eigenx-kms-client/internal/cli"
 	localcrypto "github.com/Layr-Labs/eigencompute-containers/eigenx-kms-client/pkg/crypto"
 	"github.com/Layr-Labs/eigencompute-containers/eigenx-kms-client/pkg/envclient"
+	"github.com/Layr-Labs/eigencompute-containers/eigenx-kms-client/pkg/types"
 	"github.com/Layr-Labs/eigenx-kms-go/pkg/attestation"
 	"github.com/Layr-Labs/eigenx-kms-go/pkg/clients/kmsClient"
 	"github.com/Layr-Labs/eigenx-kms-go/pkg/contractCaller/caller"
@@ -254,6 +288,7 @@ Add these helper functions after `writeEnvFile`:
 
 ```go
 // postJWTToUserAPI posts an attestation JWT to the user API
+// Matches pattern from kms-client/pkg/envclient/envclient.go
 func postJWTToUserAPI(ctx context.Context, logger *zap.Logger, userAPIURL string, jwt string) error {
 	payload := map[string]string{"jwt": jwt}
 	payloadBytes, err := json.Marshal(payload)
@@ -283,11 +318,11 @@ func postJWTToUserAPI(ctx context.Context, logger *zap.Logger, userAPIURL string
 	return nil
 }
 
-// generateRSAKeyPair generates an RSA key pair for encrypting partial signatures in transit
+// generateRSAKeyPair generates a 4096-bit RSA key pair for encrypting partial signatures in transit
+// Matches pattern from kms-client/pkg/crypto/crypto.go - uses 4096 bits
 func generateRSAKeyPair() ([]byte, []byte, error) {
-	// Use eigenx-kms-go/pkg/encryption for RSA key generation
-	rsaEncryption := encryption.NewRSAEncryption()
-	privKeyPEM, pubKeyPEM, err := rsaEncryption.GenerateKeyPair()
+	// Use eigenx-kms-go/pkg/encryption with 4096 bits (matching old kms-client)
+	privKeyPEM, pubKeyPEM, err := encryption.GenerateKeyPair(4096)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to generate RSA key pair: %w", err)
 	}
@@ -295,17 +330,22 @@ func generateRSAKeyPair() ([]byte, []byte, error) {
 }
 
 // deriveAddresses derives EVM and Solana addresses from a mnemonic
-func deriveAddresses(mnemonic string, count int) ([]string, []string, error) {
+// Returns structured types to match kms-client pattern
+func deriveAddresses(mnemonic string, count int) ([]types.EVMAddressAndDerivationPath, []types.SolanaAddressAndDerivationPath, error) {
 	return localcrypto.DeriveAddressesFromMnemonic(mnemonic, count)
 }
 
 // calculateAddressNonce creates a nonce from derived addresses for attestation
-func calculateAddressNonce(evmAddrs, solanaAddrs []string) string {
-	addresses := map[string]interface{}{
-		"evm_addresses":    evmAddrs,
-		"solana_addresses": solanaAddrs,
+// Matches pattern from kms-client/pkg/envclient/envclient.go
+func calculateAddressNonce(evmAddrs []types.EVMAddressAndDerivationPath, solanaAddrs []types.SolanaAddressAndDerivationPath) string {
+	// Marshal addresses into AddressesResponseV1 format (same as old kms-client)
+	addresses := types.AddressesResponseV1{
+		EVMAddresses:    evmAddrs,
+		SolanaAddresses: solanaAddrs,
 	}
 	addressBytes, _ := json.Marshal(addresses)
+
+	// Calculate digest with AppDerivedAddressesHeader
 	digest := localcrypto.CalculateSignableDigest(localcrypto.AppDerivedAddressesHeader, addressBytes)
 	return hex.EncodeToString(digest)
 }
@@ -339,8 +379,11 @@ func runClient(c *cli.Context) error {
 	l.Sugar().Info("Requesting GCP Confidential Space attestation")
 	tokenProvider := envclient.NewConfidentialSpaceTokenProvider(l)
 
-	// Use app ID as nonce (simple and deterministic)
-	gcpJWT, err := tokenProvider.GetToken(ctx, "EigenX KMS", cfg.AppID)
+	// Use RSA public key hash as nonce (matches old kms-client pattern)
+	rsaKeyHash := localcrypto.CalculateSignableDigest(localcrypto.EnvRequestRSAKeyHeader, rsaPubKeyPEM)
+	rsaKeyHashHex := hex.EncodeToString(rsaKeyHash)
+
+	gcpJWT, err := tokenProvider.GetToken(ctx, types.KMSJWTAudience, rsaKeyHashHex)
 	if err != nil {
 		return fmt.Errorf("failed to get GCP attestation: %w", err)
 	}
@@ -449,44 +492,44 @@ func runClient(c *cli.Context) error {
 	}
 
 	// Step 9: Derive addresses from mnemonic and post to user API
-	if mnemonic, ok := envVars["MNEMONIC"]; ok && cfg.UserAPIURL != "" {
+	// Matches pattern from kms-client/pkg/envclient/envclient.go
+	if mnemonic, ok := envVars[types.MnemonicEnvVarName]; ok && cfg.UserAPIURL != "" {
 		l.Sugar().Info("Deriving addresses from mnemonic")
 
-		evmAddrs, solanaAddrs, err := deriveAddresses(mnemonic, 5)
+		evmAddrs, solanaAddrs, err := deriveAddresses(mnemonic, types.NumAddressesToDerive)
 		if err != nil {
 			l.Sugar().Warnw("Failed to derive addresses", "error", err)
 		} else {
-			// Create nonce from derived addresses
-			addrNonce := calculateAddressNonce(evmAddrs, solanaAddrs)
-
-			// Get attestation JWT with address nonce
-			addressJWT, err := tokenProvider.GetToken(ctx, "EigenX Dashboard", addrNonce)
+			// Marshal addresses to AddressesResponseV1
+			addresses := types.AddressesResponseV1{
+				EVMAddresses:    evmAddrs,
+				SolanaAddresses: solanaAddrs,
+			}
+			addressBytes, err := json.Marshal(addresses)
 			if err != nil {
-				l.Sugar().Warnw("Failed to get address attestation", "error", err)
+				l.Sugar().Warnw("Failed to marshal addresses", "error", err)
 			} else {
-				if err := postJWTToUserAPI(ctx, l, cfg.UserAPIURL, addressJWT); err != nil {
-					l.Sugar().Warnw("Failed to post addresses to user API", "error", err)
+				l.Sugar().Info("Derived addresses from mnemonic", "addresses", string(addressBytes))
+
+				// Calculate nonce from address JSON
+				addrNonce := calculateAddressNonce(evmAddrs, solanaAddrs)
+
+				// Get attestation JWT with address nonce
+				addressJWT, err := tokenProvider.GetToken(ctx, types.DashboardJWTAudience, addrNonce)
+				if err != nil {
+					l.Sugar().Warnw("Failed to get address attestation", "error", err)
 				} else {
-					l.Sugar().Info("Posted derived addresses to user API")
+					if err := postJWTToUserAPI(ctx, l, cfg.UserAPIURL, addressJWT); err != nil {
+						l.Sugar().Warnw("Failed to post addresses to user API", "error", err)
+					} else {
+						l.Sugar().Info("Posted derived addresses to user API")
+					}
 				}
 			}
 		}
 	}
 
-	// Step 10: Post general attestation to user API (optional)
-	if cfg.UserAPIURL != "" {
-		l.Sugar().Info("Posting attestation to user API")
-		userJWT, err := tokenProvider.GetToken(ctx, "EigenX Dashboard", cfg.AppID)
-		if err != nil {
-			l.Sugar().Warnw("Failed to get user API attestation", "error", err)
-		} else {
-			if err := postJWTToUserAPI(ctx, l, cfg.UserAPIURL, userJWT); err != nil {
-				l.Sugar().Warnw("Failed to post to user API", "error", err)
-			}
-		}
-	}
-
-	// Step 11: Output environment variables
+	// Step 10: Output environment variables
 	envJSONBytes, _ := json.Marshal(envVars)
 
 	if cfg.OutputFile != "" {
