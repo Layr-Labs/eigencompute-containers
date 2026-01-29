@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/Layr-Labs/eigenx-contracts v0.0.0-20251029225636-ebe262ca5719
-	github.com/Layr-Labs/eigenx-kms-go v0.0.0-20260114151958-d916464adff4
+	github.com/Layr-Labs/eigenx-kms-go v0.1.1-0.20260128164531-bae60464f2f7
 	github.com/cenkalti/backoff/v5 v5.0.3
 	github.com/ethereum/go-ethereum v1.16.7
 	github.com/gagliardetto/solana-go v1.14.0
