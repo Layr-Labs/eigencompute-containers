@@ -41,4 +41,31 @@ var (
 		EnvVars:  []string{"USERAPI_URL"},
 		Required: true,
 	}
+
+	AVSAddressFlag = &cli.StringFlag{
+		Name:     "avs-address",
+		Usage:    "AVS contract address for operator discovery",
+		Required: true,
+		EnvVars:  []string{"AVS_ADDRESS"},
+	}
+
+	OperatorSetIDFlag = &cli.UintFlag{
+		Name:    "operator-set-id",
+		Usage:   "Operator set ID to use for threshold decryption",
+		Value:   0,
+		EnvVars: []string{"OPERATOR_SET_ID"},
+	}
+
+	AppIDRequiredFlag = &cli.StringFlag{
+		Name:     "app-id",
+		Usage:    "Application ID for IBE decryption (required)",
+		Required: true,
+		EnvVars:  []string{"APP_ID"},
+	}
+
+	AppControllerAddressFlag = &cli.StringFlag{
+		Name:    "app-controller-address",
+		Usage:   "AppController contract address (optional, for on-chain env retrieval)",
+		EnvVars: []string{"APP_CONTROLLER_ADDRESS"},
+	}
 )
