@@ -106,15 +106,15 @@ result, err := client.RetrieveSecretsWithOptions(appID, &kmsClient.SecretsOption
 
 ### Tasks
 
-- [ ] Add CLI flag `AVSAddressFlag` to `eigenx-kms-client/internal/cli/flags.go`
-- [ ] Add CLI flag `OperatorSetIDFlag` to `eigenx-kms-client/internal/cli/flags.go`
-- [ ] Add CLI flag `AppIDRequiredFlag` to `eigenx-kms-client/internal/cli/flags.go`
-- [ ] Add CLI flag `AppControllerAddressFlag` to `eigenx-kms-client/internal/cli/flags.go` (optional)
-- [ ] Update `Config` struct in `eigenx-kms-client/internal/cli/config.go` with new fields
-- [ ] Update `NewConfigFromCLI` in `eigenx-kms-client/internal/cli/config.go` to read new flags
-- [ ] Add `NewLogger` function to `eigenx-kms-client/internal/cli/config.go`
-- [ ] Run `go mod tidy` to verify dependencies
-- [ ] Verify build succeeds: `cd eigenx-kms-client && go build ./cmd/kms-client`
+- [x] Add CLI flag `AVSAddressFlag` to `eigenx-kms-client/internal/cli/flags.go`
+- [x] Add CLI flag `OperatorSetIDFlag` to `eigenx-kms-client/internal/cli/flags.go`
+- [x] Add CLI flag `AppIDRequiredFlag` to `eigenx-kms-client/internal/cli/flags.go`
+- [x] Add CLI flag `AppControllerAddressFlag` to `eigenx-kms-client/internal/cli/flags.go` (optional)
+- [x] Update `Config` struct in `eigenx-kms-client/internal/cli/config.go` with new fields
+- [x] Update `NewConfigFromCLI` in `eigenx-kms-client/internal/cli/config.go` to read new flags
+- [x] Add `NewLogger` function to `eigenx-kms-client/internal/cli/config.go`
+- [x] Run `go mod tidy` to verify dependencies
+- [x] Verify build succeeds: `cd eigenx-kms-client && make build` ✅ Binary at `bin/kms-client`
 
 ### Task 1.1: Add Required CLI Flags
 
@@ -208,6 +208,17 @@ Verify these dependencies are present:
 - `github.com/Layr-Labs/eigenx-contracts` - For AppController bindings
 
 **Verification**: `cd eigenx-kms-client && go mod tidy && go build ./cmd/kms-client` should succeed.
+
+### ✅ Milestone 1 Completed
+
+**Additional**: Created `eigenx-kms-client/Makefile` with build targets:
+- `make build` - Builds binary to `bin/kms-client`
+- `make clean` - Remove build artifacts
+- `make test` - Run unit tests
+- `make lint` - Run golangci-lint
+- `make deps` - Download and tidy dependencies
+
+**Status**: All configuration and dependencies are in place. Build verified successful. Binary ready at `eigenx-kms-client/bin/kms-client`.
 
 ---
 
