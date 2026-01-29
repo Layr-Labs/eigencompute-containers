@@ -8,6 +8,8 @@ github.com/Layr-Labs/eigenx-kms-go v0.0.0-20260109151032-818068f88bf4 h1:pwMuTr4
 github.com/Layr-Labs/eigenx-kms-go v0.0.0-20260109151032-818068f88bf4/go.mod h1:V1ULzpTMd1QruAjcN4m6SuOb7bBuMam7vRQfBfz2buw=
 github.com/Layr-Labs/eigenx-kms-go v0.0.0-20260114151958-d916464adff4 h1:Pg2Q1fm/JpqbzFMK48LCFPmIEQEz4yfvrESaQ0jFcWk=
 github.com/Layr-Labs/eigenx-kms-go v0.0.0-20260114151958-d916464adff4/go.mod h1:V1ULzpTMd1QruAjcN4m6SuOb7bBuMam7vRQfBfz2buw=
+github.com/Layr-Labs/eigenx-kms-go v0.1.1-0.20260128164531-bae60464f2f7 h1:Nv0rfFyw8eF6YdyRafGmED4ER5W107/GkcndxDzyQb4=
+github.com/Layr-Labs/eigenx-kms-go v0.1.1-0.20260128164531-bae60464f2f7/go.mod h1:V1ULzpTMd1QruAjcN4m6SuOb7bBuMam7vRQfBfz2buw=
 github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERoyfY=
 github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
 github.com/ProjectZKM/Ziren/crates/go-runtime/zkvm_runtime v0.0.0-20251001021608-1fe7b43fc4d6 h1:1zYrtlhrZ6/b6SAjLSfKzWtdgqK0U+HtH/VcBWh1BaU=
