@@ -4,35 +4,6 @@
 
 Update `eigenx-kms-client` to use the `pkg/clients/kmsClient.Client` from `eigenx-kms-go` for distributed threshold cryptography. The client will maintain the same CLI interface as the old `kms-client` (single command that outputs environment variables) but leverage the new distributed KMS implementation using IBE (Identity-Based Encryption) and threshold signatures.
 
-## Milestones
-
-### Milestone 1: Configuration & Dependencies (30 min)
-- Add required CLI flags (avs-address, operator-set-id, app-id)
-- Update Config struct to support new blockchain parameters
-- Update go.mod dependencies
-- Verify build succeeds
-
-### Milestone 2: Main Integration (1 hour)
-- Update main.go imports to use eigenx-kms-go packages
-- Rewrite runClient function to use kmsClient.Client
-- Integrate GCP attestation with distributed KMS flow
-- Add helper functions for user API posting
-
-### Milestone 3: Address Derivation & Output (30 min)
-- Port address derivation logic from old kms-client
-- Implement address nonce calculation and user API posting
-- Ensure output formatting matches old kms-client behavior
-
-### Milestone 4: Docker & Build (15 min)
-- Update Dockerfile for local build
-- Test Docker build
-- Verify binary location and entrypoint
-
-### Milestone 5: Testing & Validation (30 min)
-- Build and run locally
-- Verify integration with mock/test operators
-- Validate output format matches old kms-client
-
 ## Current State
 
 ### Already Implemented in eigenx-kms-client
@@ -45,8 +16,8 @@ Looking at the current code, eigenx-kms-client already has:
 - ✅ Partial main.go setup with ethereumClient, contractCaller, envManager
 
 ### Current Issues
-1. **main.go line 79**: Still calls old `envclient.NewEnvClient` with `cfg.ServerURL` (which doesn't exist in config)
-2. **main.go line 64**: AppControllerAddress is TODO (empty address)
+1. **main.go line 74**: Still calls old `envclient.NewEnvClient` with `cfg.ServerURL` (which doesn't exist in config)
+2. **main.go line 59**: AppControllerAddress is TODO (empty address)
 3. **Missing integration**: Doesn't use `kmsClient.Client` from eigenx-kms-go
 4. **config.go**: Missing AVSAddress and other blockchain flags
 
@@ -83,26 +54,36 @@ result, err := client.RetrieveSecretsWithOptions(appID, &kmsClient.SecretsOption
 
 ### Two Approaches for Env Retrieval
 
-**Approach A: Operators provide env (via `/secrets` endpoint)**
+**Approach A: Operators provide env (via `/secrets` endpoint)** ✅ CHOSEN
 - Client calls `kmsClient.RetrieveSecretsWithOptions`
 - Operators return `EncryptedEnv + EncryptedPartialSig`
 - Client decrypts partial sigs, recovers private key
 - Client decrypts env using recovered key
 
-**Approach B: On-chain env registry (via `envManager`)**
+**Approach B: On-chain env registry (via `envManager`)** (Optional)
 - Client calls `envManager.GetEnvironmentForLatestRelease` to get encrypted env from AppController contract
 - Client calls `kmsClient.RetrieveSecretsWithOptions` to get app private key
 - Client decrypts env using `envManager.DecryptSecretEnv`
 
-**Recommended: Approach A** (simpler, follows eigenx-kms-go pattern)
+---
 
-## Detailed Implementation Plan
-
-### Milestone 1: Configuration & Dependencies
+## Milestone 1: Configuration & Dependencies (~30 min)
 
 **Goal**: Update configuration to support distributed KMS parameters and verify dependencies are in place.
 
-#### Task 1.1: Add Required CLI Flags
+### Tasks
+
+- [ ] Add CLI flag `AVSAddressFlag` to `eigenx-kms-client/internal/cli/flags.go`
+- [ ] Add CLI flag `OperatorSetIDFlag` to `eigenx-kms-client/internal/cli/flags.go`
+- [ ] Add CLI flag `AppIDRequiredFlag` to `eigenx-kms-client/internal/cli/flags.go`
+- [ ] Add CLI flag `AppControllerAddressFlag` to `eigenx-kms-client/internal/cli/flags.go` (optional)
+- [ ] Update `Config` struct in `eigenx-kms-client/internal/cli/config.go` with new fields
+- [ ] Update `NewConfigFromCLI` in `eigenx-kms-client/internal/cli/config.go` to read new flags
+- [ ] Add `NewLogger` function to `eigenx-kms-client/internal/cli/config.go`
+- [ ] Run `go mod tidy` to verify dependencies
+- [ ] Verify build succeeds: `cd eigenx-kms-client && go build ./cmd/kms-client`
+
+### Task 1.1: Add Required CLI Flags
 
 **File**: `eigenx-kms-client/internal/cli/flags.go`
 **Action**: Add blockchain-specific flags after line 44:
@@ -129,12 +110,6 @@ result, err := client.RetrieveSecretsWithOptions(appID, &kmsClient.SecretsOption
 		EnvVars:  []string{"APP_ID"},
 	}
 
-	ImageDigestFlag = &cli.StringFlag{
-		Name:    "image-digest",
-		Usage:   "Container image digest for attestation (e.g., sha256:abc123...)",
-		EnvVars: []string{"IMAGE_DIGEST"},
-	}
-
 	AppControllerAddressFlag = &cli.StringFlag{
 		Name:    "app-controller-address",
 		Usage:   "AppController contract address (optional, for on-chain env retrieval)",
@@ -142,9 +117,8 @@ result, err := client.RetrieveSecretsWithOptions(appID, &kmsClient.SecretsOption
 	}
 ```
 
-**Note**: We're removing `ImageDigestFlag` since image digest will be extracted from GCP JWT automatically.
+### Task 1.2: Update config.go
 
-#### Task 1.2: Update config.go
 **File**: `eigenx-kms-client/internal/cli/config.go`
 
 Replace entire file with:
@@ -191,55 +165,74 @@ func NewLogger(debug bool) (*zap.Logger, error) {
 }
 ```
 
-#### Task 1.3: Verify Dependencies
+### Task 1.3: Verify Dependencies
 
 **File**: `eigenx-kms-client/go.mod`
 
-**Action**: Run `go mod tidy` and verify these dependencies are present:
+Verify these dependencies are present:
 - `github.com/Layr-Labs/chain-indexer` - For Ethereum client
 - `github.com/Layr-Labs/eigenx-kms-go` - For kmsClient, crypto, attestation
-- `github.com/Layr-Labs/eigenx-contracts` - For AppController bindings (if using on-chain)
+- `github.com/Layr-Labs/eigenx-contracts` - For AppController bindings
 
 **Verification**: `cd eigenx-kms-client && go mod tidy && go build ./cmd/kms-client` should succeed.
 
 ---
 
-### Milestone 2: Main Integration with kmsClient.Client
+## Milestone 2: Main Integration with kmsClient.Client (~1 hour)
 
 **Goal**: Rewrite main.go to use distributed KMS instead of centralized server.
 
-#### Task 2.1: Update imports
+### Tasks
+
+- [ ] Update imports in `eigenx-kms-client/cmd/kms-client/main.go`
+- [ ] Update CLI flags in main app definition
+- [ ] Implement `generateRSAKeyPair()` helper function
+- [ ] Implement `deriveAddresses()` helper function
+- [ ] Implement `calculateAddressNonce()` helper function
+- [ ] Implement `postJWTToUserAPI()` helper function
+- [ ] Rewrite `runClient()` function with 10-step flow
+- [ ] Test build: `go build ./cmd/kms-client`
+
+### Task 2.1: Update imports
+
 **File**: `eigenx-kms-client/cmd/kms-client/main.go`
 
 Replace imports (lines 3-19) with:
 
 ```go
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Layr-Labs/chain-indexer/pkg/clients/ethereum"
 	kmscli "github.com/Layr-Labs/eigencompute-containers/eigenx-kms-client/internal/cli"
+	localcrypto "github.com/Layr-Labs/eigencompute-containers/eigenx-kms-client/pkg/crypto"
 	"github.com/Layr-Labs/eigencompute-containers/eigenx-kms-client/pkg/envclient"
-	"github.com/Layr-Labs/eigencompute-containers/eigenx-kms-client/pkg/envManager"
 	"github.com/Layr-Labs/eigenx-kms-go/pkg/attestation"
 	"github.com/Layr-Labs/eigenx-kms-go/pkg/clients/kmsClient"
 	"github.com/Layr-Labs/eigenx-kms-go/pkg/contractCaller/caller"
 	"github.com/Layr-Labs/eigenx-kms-go/pkg/crypto"
-	"github.com/Layr-Labs/eigenx-kms-go/pkg/logger"
+	"github.com/Layr-Labs/eigenx-kms-go/pkg/encryption"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/urfave/cli/v2"
+	"go.uber.org/zap"
 )
 ```
 
-#### Task 2.2: Update CLI flags
+### Task 2.2: Update CLI flags
+
 **File**: `eigenx-kms-client/cmd/kms-client/main.go`
 
-Update Flags slice (lines 25-32):
+Update Flags slice (around line 25):
 
 ```go
 		Flags: []cli.Flag{
@@ -255,10 +248,74 @@ Update Flags slice (lines 25-32):
 		},
 ```
 
-#### Task 2.3: Rewrite runClient function
+### Task 2.3: Implement Helper Functions
+
+Add these helper functions after `writeEnvFile`:
+
+```go
+// postJWTToUserAPI posts an attestation JWT to the user API
+func postJWTToUserAPI(ctx context.Context, logger *zap.Logger, userAPIURL string, jwt string) error {
+	payload := map[string]string{"jwt": jwt}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal JWT payload: %w", err)
+	}
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, "POST", userAPIURL+"/attestation", bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	logger.Sugar().Info("Successfully posted JWT to user API")
+	return nil
+}
+
+// generateRSAKeyPair generates an RSA key pair for encrypting partial signatures in transit
+func generateRSAKeyPair() ([]byte, []byte, error) {
+	// Use eigenx-kms-go/pkg/encryption for RSA key generation
+	rsaEncryption := encryption.NewRSAEncryption()
+	privKeyPEM, pubKeyPEM, err := rsaEncryption.GenerateKeyPair()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to generate RSA key pair: %w", err)
+	}
+	return privKeyPEM, pubKeyPEM, nil
+}
+
+// deriveAddresses derives EVM and Solana addresses from a mnemonic
+func deriveAddresses(mnemonic string, count int) ([]string, []string, error) {
+	return localcrypto.DeriveAddressesFromMnemonic(mnemonic, count)
+}
+
+// calculateAddressNonce creates a nonce from derived addresses for attestation
+func calculateAddressNonce(evmAddrs, solanaAddrs []string) string {
+	addresses := map[string]interface{}{
+		"evm_addresses":    evmAddrs,
+		"solana_addresses": solanaAddrs,
+	}
+	addressBytes, _ := json.Marshal(addresses)
+	digest := localcrypto.CalculateSignableDigest(localcrypto.AppDerivedAddressesHeader, addressBytes)
+	return hex.EncodeToString(digest)
+}
+```
+
+### Task 2.4: Rewrite runClient Function
+
 **File**: `eigenx-kms-client/cmd/kms-client/main.go`
 
-Replace runClient function (lines 42-93) with:
+Replace runClient function with the following 10-step flow:
 
 ```go
 func runClient(c *cli.Context) error {
@@ -273,8 +330,6 @@ func runClient(c *cli.Context) error {
 
 	// Step 1: Generate ephemeral RSA key pair for encrypting partial signatures
 	l.Sugar().Info("Generating RSA key pair for secure transport")
-
-	// Check if eigenx-kms-go has this, otherwise use local crypto package
 	rsaPrivKeyPEM, rsaPubKeyPEM, err := generateRSAKeyPair()
 	if err != nil {
 		return fmt.Errorf("failed to generate RSA key pair: %w", err)
@@ -296,7 +351,8 @@ func runClient(c *cli.Context) error {
 	// Note: We need GCP project ID - either from env var or config
 	projectID := os.Getenv("GCP_PROJECT_ID")
 	if projectID == "" {
-		projectID = "eigenx-compute" // Default or from config
+		projectID = "eigenx-compute" // Default
+		l.Sugar().Warn("GCP_PROJECT_ID not set, using default", "project_id", projectID)
 	}
 
 	verifier, err := attestation.NewAttestationVerifier(ctx, l.Sugar(), projectID, 15*time.Minute, cfg.Debug)
@@ -396,7 +452,6 @@ func runClient(c *cli.Context) error {
 	if mnemonic, ok := envVars["MNEMONIC"]; ok && cfg.UserAPIURL != "" {
 		l.Sugar().Info("Deriving addresses from mnemonic")
 
-		// Use local crypto package for address derivation
 		evmAddrs, solanaAddrs, err := deriveAddresses(mnemonic, 5)
 		if err != nil {
 			l.Sugar().Warnw("Failed to derive addresses", "error", err)
@@ -418,7 +473,7 @@ func runClient(c *cli.Context) error {
 		}
 	}
 
-	// Step 10: Output environment variables
+	// Step 10: Post general attestation to user API (optional)
 	if cfg.UserAPIURL != "" {
 		l.Sugar().Info("Posting attestation to user API")
 		userJWT, err := tokenProvider.GetToken(ctx, "EigenX Dashboard", cfg.AppID)
@@ -431,6 +486,7 @@ func runClient(c *cli.Context) error {
 		}
 	}
 
+	// Step 11: Output environment variables
 	envJSONBytes, _ := json.Marshal(envVars)
 
 	if cfg.OutputFile != "" {
@@ -443,127 +499,21 @@ func runClient(c *cli.Context) error {
 }
 ```
 
-#### Task 2.4: Add helper functions
-
-Add after runClient:
-
-```go
-func postJWTToUserAPI(ctx context.Context, logger *zap.Logger, userAPIURL string, jwt string) error {
-	payload := map[string]string{"jwt": jwt}
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("failed to marshal JWT payload: %w", err)
-	}
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, "POST", userAPIURL+"/attestation", bytes.NewBuffer(payloadBytes))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("HTTP request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	logger.Sugar().Info("Successfully posted JWT to user API")
-	return nil
-}
-
-// Helper to generate RSA key pair (check if eigenx-kms-go/pkg/crypto has this)
-func generateRSAKeyPair() ([]byte, []byte, error) {
-	// If eigenx-kms-go/pkg/crypto has GenerateRSAKeyPairPEM, use it
-	// Otherwise use local crypto package from eigenx-kms-client
-	// For now, placeholder - will verify which one exists
-	return nil, nil, fmt.Errorf("TODO: implement RSA key generation")
-}
-
-// Helper to derive addresses (use local crypto package)
-func deriveAddresses(mnemonic string, count int) ([]string, []string, error) {
-	// Use eigenx-kms-client/pkg/crypto/crypto.go and crypto/solana.go
-	// These should already have DeriveAddressesFromMnemonic
-	return nil, nil, fmt.Errorf("TODO: implement address derivation")
-}
-
-// Helper to calculate nonce from addresses
-func calculateAddressNonce(evmAddrs, solanaAddrs []string) string {
-	// Match old kms-client behavior for nonce calculation
-	// Likely involves marshaling addresses to JSON and hashing
-	return ""
-}
-```
-
 ---
 
-### Milestone 3: Address Derivation & User API Integration
+## Milestone 3: Update Dockerfile (~15 min)
 
-**Goal**: Port address derivation logic from old kms-client and integrate with user API.
+**Goal**: Update Dockerfile to build eigenx-kms-client locally (no git clone).
 
-#### Task 3.1: Implement Address Derivation Helpers
+### Tasks
 
-#### 3.1 Add eigenx-kms-go dependency
-**File**: `eigenx-kms-client/go.mod`
+- [ ] Replace Dockerfile with local build configuration
+- [ ] Test Docker build: `docker build -f eigenx-kms-client/Dockerfile eigenx-kms-client`
+- [ ] Verify binary location: `/eigen/bin/eigenx-kms-client`
+- [ ] Test Docker run: `docker run --rm eigenx-kms-client --help`
 
-The go.mod already references `eigenx-kms-go/kms-client` packages. Update to use the new structure:
+### Task 3.1: Update Dockerfile
 
-```go
-module github.com/Layr-Labs/eigencompute-containers/eigenx-kms-client
-
-go 1.25.0
-
-require (
-	github.com/Layr-Labs/chain-indexer v<latest>
-	github.com/Layr-Labs/eigenx-kms-go v<latest>
-	github.com/Layr-Labs/eigenx-contracts v<latest>  // For AppController bindings
-	github.com/cenkalti/backoff/v5 v5.0.3
-	github.com/ethereum/go-ethereum v1.16.7
-	github.com/gagliardetto/solana-go v1.14.0
-	github.com/lestrrat-go/jwx/v3 v3.0.12
-	github.com/miguelmota/go-ethereum-hdwallet v0.1.3
-	github.com/urfave/cli/v2 v2.27.7
-	go.uber.org/zap v1.27.1
-	golang.org/x/crypto v0.45.0
-)
-```
-
-Run `go mod tidy` after changes.
-
-**File**: `eigenx-kms-client/cmd/kms-client/main.go`
-
-**Action**: Implement the helper functions added in Task 2.4:
-
-1. **generateRSAKeyPair()**: Check if `eigenx-kms-go/pkg/crypto` or `eigenx-kms-go/pkg/encryption` has RSA key pair generation. If not, use the implementation from old `eigenx-kms-client/pkg/crypto/crypto.go`.
-
-2. **deriveAddresses()**: Use the existing `eigenx-kms-client/pkg/crypto` package:
-   ```go
-   import localcrypto "github.com/Layr-Labs/eigencompute-containers/eigenx-kms-client/pkg/crypto"
-
-   func deriveAddresses(mnemonic string, count int) ([]string, []string, error) {
-       return localcrypto.DeriveAddressesFromMnemonic(mnemonic, count)
-   }
-   ```
-
-3. **calculateAddressNonce()**: Match the old kms-client behavior by creating a digest of the addresses JSON.
-
-#### Task 3.2: Verify Address Posting Flow
-
-**Action**: Ensure the user API posting matches the old kms-client:
-- POST to `{userAPIURL}/attestation`
-- Payload: `{"jwt": "..."}`
-- JWT contains addresses in nonce claim
-
----
-
-### Milestone 4: Update Dockerfile
-
-#### Task 4.1: Update Dockerfile for local build
 **File**: `eigenx-kms-client/Dockerfile`
 
 Replace entire file with:
@@ -593,15 +543,23 @@ COPY --from=builder /out/eigenx-kms-client /eigen/bin/eigenx-kms-client
 ENTRYPOINT ["/eigen/bin/eigenx-kms-client"]
 ```
 
-**Verification**: `docker build -f eigenx-kms-client/Dockerfile eigenx-kms-client` should succeed.
-
 ---
 
-### Milestone 5: Testing & Validation
+## Milestone 4: Testing & Validation (~30 min)
 
 **Goal**: Verify the client works end-to-end with distributed KMS operators.
 
-#### Task 5.1: Build Test
+### Tasks
+
+- [ ] Build test: `cd eigenx-kms-client && go build ./cmd/kms-client`
+- [ ] Help test: `./kms-client --help` (verify new flags are present)
+- [ ] Docker build test: `docker build -f eigenx-kms-client/Dockerfile eigenx-kms-client`
+- [ ] Docker help test: `docker run --rm eigenx-kms-client --help`
+- [ ] Integration test with operators (if available)
+- [ ] Verify output format matches old kms-client
+
+### Task 4.1: Build Test
+
 ```bash
 cd eigenx-kms-client
 go mod tidy
@@ -609,9 +567,17 @@ go build ./cmd/kms-client
 ./kms-client --help
 ```
 
-**Expected**: Should display help with new flags (--eth-rpc-url, --avs-address, --operator-set-id, --app-id).
+**Expected**: Should display help with new flags:
+- `--eth-rpc-url`
+- `--avs-address` (required)
+- `--operator-set-id`
+- `--app-id` (required)
+- `--debug`
+- `--output-file`
+- `--userapi-url`
 
-#### Task 5.2: Docker Build Test
+### Task 4.2: Docker Build Test
+
 ```bash
 docker build -f eigenx-kms-client/Dockerfile eigenx-kms-client
 docker run --rm eigenx-kms-client --help
@@ -619,7 +585,8 @@ docker run --rm eigenx-kms-client --help
 
 **Expected**: Docker build succeeds, binary is at `/eigen/bin/eigenx-kms-client`.
 
-#### Task 5.3: Integration Test (requires running operators)
+### Task 4.3: Integration Test (requires running operators)
+
 ```bash
 ./eigenx-kms-client \
   --eth-rpc-url http://localhost:8545 \
@@ -630,7 +597,7 @@ docker run --rm eigenx-kms-client --help
   --debug
 ```
 
-**Expected output**:
+**Expected output flow**:
 ```
 INFO  Generating RSA key pair for secure transport
 INFO  Requesting GCP Confidential Space attestation
@@ -659,207 +626,33 @@ INFO  Posted derived addresses to user API
 
 ---
 
-## Alternative Approach: On-Chain Env Registry (Optional)
-
-If you want to use on-chain env registry instead of operators providing env:
-
-### Modified runClient (Step 4-5)
-
-```go
-	// Step 4a: Parse GCP JWT to get attestation claims
-	verifier, err := attestation.NewAttestationVerifier(ctx, l.Sugar(), "project-id", 15*time.Minute, cfg.Debug)
-	if err != nil {
-		return fmt.Errorf("failed to create verifier: %w", err)
-	}
-
-	claims, err := verifier.VerifyAttestation(ctx, gcpJWT, attestation.GoogleConfidentialSpace)
-	if err != nil {
-		return fmt.Errorf("failed to verify attestation: %w", err)
-	}
-
-	// Step 4b: Get encrypted env from on-chain AppController
-	if cfg.AppControllerAddress == "" {
-		return fmt.Errorf("app-controller-address is required for on-chain env retrieval")
-	}
-
-	appCC, err := caller.NewContractCaller(l1Client, &caller.ContractsConfig{
-		AppControllerAddress: common.HexToAddress(cfg.AppControllerAddress),
-	}, l)
-	if err != nil {
-		return fmt.Errorf("failed to create app contract caller: %w", err)
-	}
-
-	envMgr, err := envManager.NewEnvManager(l, appCC)
-	if err != nil {
-		return fmt.Errorf("failed to create env manager: %w", err)
-	}
-
-	publicEnv, encryptedEnvJWE, err := envMgr.GetEnvironmentForLatestRelease(ctx, claims)
-	if err != nil {
-		return fmt.Errorf("failed to get environment from contract: %w", err)
-	}
-
-	// Step 5: Use kmsClient to get app private key only (not env)
-	result, err := kmsClientInstance.RetrieveSecretsWithOptions(cfg.AppID, &kmsClient.SecretsOptions{
-		AttestationMethod: "gcp",
-		ImageDigest:       claims.ImageDigest,
-		RSAPrivateKeyPEM:  rsaPrivKeyPEM,
-		RSAPublicKeyPEM:   rsaPubKeyPEM,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to retrieve secrets: %w", err)
-	}
-
-	// Step 6: Decrypt using envManager (which handles JWE format)
-	privateEnv, err := envMgr.DecryptSecretEnv(cfg.AppID, result.AppPrivateKey, encryptedEnvJWE)
-	if err != nil {
-		return fmt.Errorf("failed to decrypt environment: %w", err)
-	}
-
-	// Merge public and private env
-	envVars := make(map[string]string)
-	for k, v := range publicEnv {
-		envVars[k] = v
-	}
-	for k, v := range privateEnv {
-		envVars[k] = v
-	}
-```
-
-## Key Integration Points
-
-### 1. RSA Key Generation
-From eigenx-kms-go, check if there's a helper:
-- `crypto.GenerateRSAKeyPairPEM()` or similar
-- OR use the old envclient crypto: `crypto.GenerateRSAKeyPair()`
-
-### 2. Attestation JWT Generation
-Use existing `envclient.ConfidentialSpaceTokenProvider`:
-- Already implemented in `eigenx-kms-client/pkg/envclient/envclient.go`
-- Connects to GCP Confidential Space via Unix socket
-- Returns JWT with attestation claims
-
-### 3. Image Digest Extraction
-Options:
-- Parse from GCP JWT using `attestation.VerifyAttestation`
-- OR pass via CLI flag `--image-digest`
-- OR extract from environment variable
-
-## Critical Files to Modify
-
-1. ✅ `eigenx-kms-client/internal/cli/flags.go` - Add AVS, operator-set-id, app-id, image-digest flags
-2. ✅ `eigenx-kms-client/internal/cli/config.go` - Complete rewrite with new config fields
-3. ✅ `eigenx-kms-client/cmd/kms-client/main.go` - Rewrite runClient to use kmsClient.Client
-4. ✅ `eigenx-kms-client/go.mod` - Verify eigenx-kms-go dependency
-5. ✅ `eigenx-kms-client/Dockerfile` - Update to build locally
-
-## Files to Keep (No Changes)
-
-- `eigenx-kms-client/pkg/envclient/envclient.go` - Keep ConfidentialSpaceTokenProvider only
-- `eigenx-kms-client/pkg/envManager/envManager.go` - Keep if using on-chain env (optional)
-- `eigenx-kms-client/pkg/contractCaller/` - Keep if using on-chain env (optional)
-- `eigenx-kms-client/pkg/crypto/` - Keep for address derivation (if needed)
-- `eigenx-kms-client/pkg/types/` - Keep for local type definitions
-
-## Testing & Verification
-
-### Build Test
-```bash
-cd eigenx-kms-client
-go mod tidy
-go build ./cmd/kms-client
-```
-
-### Docker Build Test
-```bash
-docker build -f eigenx-kms-client/Dockerfile eigenx-kms-client
-```
-
-### Runtime Test (Approach A: Operators provide env)
-```bash
-./eigenx-kms-client \
-  --eth-rpc-url http://localhost:8545 \
-  --avs-address 0x1234567890123456789012345678901234567890 \
-  --operator-set-id 0 \
-  --app-id my-app-id \
-  --image-digest sha256:abc123... \
-  --userapi-url http://localhost:3000 \
-  --debug
-```
-
-Expected flow:
-1. ✅ Generate GCP attestation JWT
-2. ✅ Create kmsClient with blockchain config
-3. ✅ Call RetrieveSecretsWithOptions with GCP attestation
-4. ✅ Operators return encrypted env + encrypted partial signatures
-5. ✅ Client decrypts partial sigs and recovers app private key
-6. ✅ Client decrypts env using IBE
-7. ✅ Output environment variables as JSON or export statements
-
-### Runtime Test (Approach B: On-chain env registry)
-```bash
-./eigenx-kms-client \
-  --eth-rpc-url http://localhost:8545 \
-  --avs-address 0x1234... \
-  --operator-set-id 0 \
-  --app-id 0x5678... \
-  --app-controller-address 0xABCD... \
-  --userapi-url http://localhost:3000 \
-  --debug
-```
-
-Expected flow:
-1. ✅ Generate GCP attestation JWT and parse claims
-2. ✅ Get encrypted env from AppController contract via envManager
-3. ✅ Create kmsClient and call RetrieveSecretsWithOptions
-4. ✅ Decrypt env using envManager.DecryptSecretEnv
-5. ✅ Output combined public + private env vars
-
 ## Implementation Summary
-
-### Core Changes
-1. **Replace centralized KMS call** with distributed threshold cryptography
-2. **Use `kmsClient.Client`** from eigenx-kms-go as the main integration point
-3. **Keep GCP attestation** for proving TEE environment
-4. **Support two modes**:
-   - Operators provide encrypted env (simpler)
-   - On-chain AppController provides env (more decentralized)
 
 ### What This Achieves
 - ✅ Same CLI interface as old kms-client
 - ✅ Distributed threshold cryptography (no single point of failure)
 - ✅ GCP Confidential Space attestation (proves TEE execution)
 - ✅ IBE encryption/decryption (Boneh-Franklin scheme)
-- ✅ On-chain or operator-hosted encrypted env (flexible architecture)
+- ✅ Operator-hosted encrypted env (via `/secrets` endpoint)
 - ✅ Local build (no git clone in Dockerfile)
+- ✅ Address derivation from mnemonic preserved
+- ✅ User API JWT posting preserved
 
-## Decisions Made
+### Critical Files Modified
 
-1. ✅ **Env Source**: Use operators via `/secrets` endpoint (Approach A)
-2. ✅ **Address Derivation**: YES - preserve old kms-client behavior (derive from mnemonic and post to user API)
-3. ✅ **Image Digest**: Extract automatically from GCP JWT (like old kms-client)
-4. ✅ **Build**: Local build, no external git clone
+1. `eigenx-kms-client/internal/cli/flags.go` - Add AVS, operator-set-id, app-id flags
+2. `eigenx-kms-client/internal/cli/config.go` - Update Config struct and add NewLogger
+3. `eigenx-kms-client/cmd/kms-client/main.go` - Complete rewrite of runClient + add helpers
+4. `eigenx-kms-client/Dockerfile` - Local build
 
-## Remaining Implementation Details
+### Key Integration Points
 
-### RSA Key Pair Generation
-Check if eigenx-kms-go/pkg/crypto has `GenerateRSAKeyPairPEM()`. If not, use the crypto from old envclient:
+**RSA Key Generation**: Use `eigenx-kms-go/pkg/encryption.RSAEncryption.GenerateKeyPair()`
 
-```go
-// From eigenx-kms-client/pkg/crypto/crypto.go (if it exists)
-rsaPrivKeyPEM, rsaPubKeyPEM, err := crypto.GenerateRSAKeyPair()
-```
+**Attestation JWT**: Use existing `envclient.ConfidentialSpaceTokenProvider`
 
-### GCP Project ID
-For attestation verification, need to know the GCP project ID. Options:
-- Read from environment variable `GCP_PROJECT_ID`
-- Add CLI flag `--gcp-project-id`
-- OR skip full JWT verification and just extract claims without verification
+**Image Digest**: Extract from GCP JWT using `attestation.VerifyAttestation`
 
-### Address Derivation Integration
-The old kms-client uses:
-```go
-crypto.DeriveAddressesFromMnemonic(mnemonic, numAddresses)
-```
+**Address Derivation**: Use local `pkg/crypto.DeriveAddressesFromMnemonic`
 
-This should be preserved from eigenx-kms-client/pkg/crypto if it exists, matching the old kms-client behavior.
+**GCP Project ID**: Read from `GCP_PROJECT_ID` environment variable, default to `eigenx-compute`
