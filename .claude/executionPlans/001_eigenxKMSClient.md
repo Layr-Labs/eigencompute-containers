@@ -579,10 +579,10 @@ func runClient(c *cli.Context) error {
 
 ### Tasks
 
-- [ ] Replace Dockerfile with local build configuration
-- [ ] Test Docker build: `docker build -f eigenx-kms-client/Dockerfile eigenx-kms-client`
-- [ ] Verify binary location: `/eigen/bin/eigenx-kms-client`
-- [ ] Test Docker run: `docker run --rm eigenx-kms-client --help`
+- [x] Replace Dockerfile with local build configuration
+- [x] Test Docker build: `docker build -f eigenx-kms-client/Dockerfile eigenx-kms-client` ✅ Succeeded
+- [x] Verify binary location: `/eigen/bin/eigenx-kms-client` ✅ Confirmed via help output
+- [x] Test Docker run: `docker run --rm <image> --help` ✅ Shows all flags correctly
 
 ### Task 3.1: Update Dockerfile
 
@@ -614,6 +614,22 @@ COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /out/eigenx-kms-client /eigen/bin/eigenx-kms-client
 ENTRYPOINT ["/eigen/bin/eigenx-kms-client"]
 ```
+
+### ✅ Milestone 3 Completed
+
+**Status**: Dockerfile updated to build locally instead of cloning from external repository.
+
+**Changes**:
+- Replaced git clone with local COPY
+- Uses golang:1.25 base image
+- Static binary built with `-ldflags="-s -w"`
+- FROM scratch final image (minimal size)
+- Binary placed at `/eigen/bin/eigenx-kms-client`
+
+**Verification**:
+- ✅ Docker build succeeds
+- ✅ Binary runs and shows help output correctly
+- ✅ All flags present in help
 
 ---
 
