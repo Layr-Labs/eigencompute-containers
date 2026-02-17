@@ -14,7 +14,7 @@ type Config struct {
 	KMSSigningKey        string
 	OutputFile           string
 	UserAPIURL           string
-	Debug                bool
+	LogLevel             string
 }
 
 func NewConfigFromCLI(c *cli.Context) *Config {
@@ -27,13 +27,23 @@ func NewConfigFromCLI(c *cli.Context) *Config {
 		KMSSigningKey:        c.String(KMSSigningKeyFileFlag.Name),
 		OutputFile:           c.String(OutputFileFlag.Name),
 		UserAPIURL:           c.String(UserAPIURLFlag.Name),
-		Debug:                c.Bool(Debug.Name),
+		LogLevel:             c.String(LogLevelFlag.Name),
 	}
 }
 
-func NewLogger(debug bool) (*zap.Logger, error) {
-	if debug {
-		return zap.NewDevelopment()
+func NewLogger(level string) (*zap.Logger, error) {
+	var zapLevel zap.AtomicLevel
+	switch level {
+	case "debug":
+		zapLevel = zap.NewAtomicLevelAt(zap.DebugLevel)
+	case "warn":
+		zapLevel = zap.NewAtomicLevelAt(zap.WarnLevel)
+	case "error":
+		zapLevel = zap.NewAtomicLevelAt(zap.ErrorLevel)
+	default:
+		zapLevel = zap.NewAtomicLevelAt(zap.InfoLevel)
 	}
-	return zap.NewProduction()
+	cfg := zap.NewProductionConfig()
+	cfg.Level = zapLevel
+	return cfg.Build()
 }

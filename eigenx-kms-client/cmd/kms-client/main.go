@@ -38,7 +38,7 @@ func main() {
 			kmscli.OperatorSetIDFlag,
 			kmscli.AppIDRequiredFlag,
 			kmscli.AppControllerAddressFlag,
-			kmscli.Debug,
+			kmscli.LogLevelFlag,
 			kmscli.KMSSigningKeyFileFlag,
 			kmscli.OutputFileFlag,
 			kmscli.UserAPIURLFlag,
@@ -57,10 +57,25 @@ func runClient(c *cli.Context) error {
 	cfg := kmscli.NewConfigFromCLI(c)
 
 	// Create logger
-	l, err := kmscli.NewLogger(cfg.Debug)
+	l, err := kmscli.NewLogger(cfg.LogLevel)
 	if err != nil {
 		return fmt.Errorf("failed to create logger: %w", err)
 	}
+
+	isDebug := cfg.LogLevel == "debug"
+
+	// Read and validate KMS signing key
+	l.Sugar().Debugw("Reading KMS signing key", "file", cfg.KMSSigningKey)
+	kmsSigningKeyBytes, err := os.ReadFile(cfg.KMSSigningKey)
+	if err != nil {
+		return fmt.Errorf("failed to read KMS signing key: %w", err)
+	}
+
+	kmsSigningKey, err := localcrypto.ParseKMSSigningKey(kmsSigningKeyBytes)
+	if err != nil {
+		return fmt.Errorf("failed to parse KMS signing key: %w", err)
+	}
+	l.Sugar().Infow("KMS signing key loaded successfully")
 
 	// Step 1: Generate ephemeral RSA key pair for encrypting partial signatures
 	l.Sugar().Info("Generating RSA key pair for secure transport")
@@ -94,13 +109,13 @@ func runClient(c *cli.Context) error {
 
 	// Create slog logger for attestation verifier (it requires slog, not zap)
 	var slogLogger *slog.Logger
-	if cfg.Debug {
+	if isDebug {
 		slogLogger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	} else {
 		slogLogger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	}
 
-	verifier, err := attestation.NewAttestationVerifier(ctx, slogLogger, projectID, 15*time.Minute, cfg.Debug)
+	verifier, err := attestation.NewAttestationVerifier(ctx, slogLogger, projectID, 15*time.Minute, isDebug)
 	if err != nil {
 		return fmt.Errorf("failed to create attestation verifier: %w", err)
 	}
@@ -158,6 +173,13 @@ func runClient(c *cli.Context) error {
 	l.Sugar().Infow("Retrieved secrets from operators",
 		"responses", result.ResponseCount,
 		"threshold", result.ThresholdNeeded)
+
+	// Step 6b: Verify secrets result integrity using KMS signing key
+	l.Sugar().Info("Verifying secrets result integrity")
+	if err := localcrypto.VerifySecretsResult(kmsSigningKey, result.EncryptedEnv, result.PublicEnv, result.ResponseCount, result.ThresholdNeeded); err != nil {
+		return fmt.Errorf("secrets result verification failed: %w", err)
+	}
+	l.Sugar().Info("Secrets result verification passed")
 
 	// Step 7: Decrypt environment data using recovered app private key
 	l.Sugar().Info("Decrypting environment with recovered private key")

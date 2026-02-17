@@ -10,10 +10,11 @@ var (
 		EnvVars:  []string{"ETH_RPC_URL"},
 	}
 
-	Debug = &cli.BoolFlag{
-		Name:    "debug",
-		Usage:   "Enable debug mode",
-		EnvVars: []string{"DEBUG"},
+	LogLevelFlag = &cli.StringFlag{
+		Name:    "log-level",
+		Value:   "info",
+		Usage:   "Log level (debug, info, warn, error)",
+		EnvVars: []string{"LOG_LEVEL"},
 	}
 
 	KMSSigningKeyFileFlag = &cli.StringFlag{
@@ -22,12 +23,6 @@ var (
 		Value:    "kms-signing-public-key.pem",
 		EnvVars:  []string{"KMS_SIGNING_KEY_FILE"},
 		Required: true,
-	}
-
-	AppIDFlag = &cli.StringFlag{
-		Name:    "app-id",
-		Usage:   "App ID to spoof (debug mode only)",
-		EnvVars: []string{"APP_ID"},
 	}
 
 	OutputFileFlag = &cli.StringFlag{

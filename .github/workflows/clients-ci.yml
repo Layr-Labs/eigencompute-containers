@@ -14,6 +14,7 @@ jobs:
         client:
           - tls-client
           - kms-client
+          - eigenx-kms-client
     defaults:
       run:
         working-directory: ${{ matrix.client }}
@@ -33,6 +34,7 @@ jobs:
         client:
           - tls-client
           - kms-client
+          - eigenx-kms-client
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

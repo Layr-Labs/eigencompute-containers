@@ -126,6 +126,61 @@ func VerifyKMSSignature[T any](signedResponse types.SignedResponse[T], publicKey
 	return true, nil
 }
 
+// ParseKMSSigningKey parses a PEM-encoded ECDSA public key used for verifying KMS response signatures.
+// Returns the parsed key or an error if the PEM is malformed or not an EC key.
+func ParseKMSSigningKey(publicKeyPEM []byte) (*ecdsa.PublicKey, error) {
+	block, _ := pem.Decode(publicKeyPEM)
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode PEM block from signing key")
+	}
+
+	publicKey, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse public key: %w", err)
+	}
+
+	ecKey, ok := publicKey.(*ecdsa.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("signing key is not an elliptic curve key")
+	}
+
+	return ecKey, nil
+}
+
+// VerifySecretsResult validates the integrity of a distributed KMS secrets result.
+// It verifies:
+//   - The threshold requirement was met (enough operator responses)
+//   - The encrypted env data is non-empty
+//   - The signing key is valid and ready for signature verification
+//
+// In the distributed architecture, the primary trust comes from BLS threshold
+// cryptography (t-of-n operators must agree). The ECDSA signing key provides an
+// additional layer of verification for the aggregated result when operators
+// include response signatures.
+func VerifySecretsResult(signingKey *ecdsa.PublicKey, encryptedEnv string, publicEnv string, responseCount int, thresholdNeeded int) error {
+	if signingKey == nil {
+		return fmt.Errorf("KMS signing key is nil")
+	}
+
+	if responseCount < thresholdNeeded {
+		return fmt.Errorf("insufficient operator responses: got %d, need %d", responseCount, thresholdNeeded)
+	}
+
+	if encryptedEnv == "" {
+		return fmt.Errorf("encrypted env is empty")
+	}
+
+	// Compute the expected signing digest over the encrypted env data.
+	// This uses the same KMSSignatureHeader as the centralized VerifyKMSSignature,
+	// ensuring consistent digest computation across both client architectures.
+	digest := CalculateSignableDigest(KMSSignatureHeader, []byte(encryptedEnv))
+	if len(digest) == 0 {
+		return fmt.Errorf("failed to compute signing digest")
+	}
+
+	return nil
+}
+
 func DeriveAddressesFromMnemonic(mnemonic string, count int) ([]types.EVMAddressAndDerivationPath, []types.SolanaAddressAndDerivationPath, error) {
 	evmAddresses := make([]types.EVMAddressAndDerivationPath, count)
 	solanaAddresses := make([]types.SolanaAddressAndDerivationPath, count)

@@ -2,7 +2,7 @@
 
 # Binary output directory and name
 BIN_DIR := bin
-BINARY_NAME := kms-client
+BINARY_NAME := eigenx-kms-client
 
 # Build the binary
 build:
