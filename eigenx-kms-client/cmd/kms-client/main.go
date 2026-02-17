@@ -24,6 +24,7 @@ import (
 	"github.com/Layr-Labs/eigenx-kms-go/pkg/contractCaller/caller"
 	"github.com/Layr-Labs/eigenx-kms-go/pkg/crypto"
 	"github.com/Layr-Labs/eigenx-kms-go/pkg/encryption"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/urfave/cli/v2"
 	"go.uber.org/zap"
 )
@@ -36,14 +37,32 @@ func main() {
 			kmscli.ETHRpcURLFlag,
 			kmscli.AVSAddressFlag,
 			kmscli.OperatorSetIDFlag,
-			kmscli.AppIDRequiredFlag,
-			kmscli.AppControllerAddressFlag,
 			kmscli.LogLevelFlag,
-			kmscli.KMSSigningKeyFileFlag,
-			kmscli.OutputFileFlag,
-			kmscli.UserAPIURLFlag,
 		},
-		Action: runClient,
+		Commands: []*cli.Command{
+			{
+				Name:  "encrypt",
+				Usage: "Encrypt data for an application using IBE",
+				Flags: []cli.Flag{
+					kmscli.AppIDRequiredFlag,
+					kmscli.DataFlag,
+					kmscli.OutputFileFlag,
+				},
+				Action: encryptCommand,
+			},
+			{
+				Name:  "decrypt",
+				Usage: "Decrypt data by collecting partial signatures from KMS operators",
+				Flags: []cli.Flag{
+					kmscli.AppIDRequiredFlag,
+					kmscli.KMSSigningKeyFileFlag,
+					kmscli.OutputFileFlag,
+					kmscli.UserAPIURLFlag,
+					kmscli.AppControllerAddressFlag,
+				},
+				Action: decryptCommand,
+			},
+		},
 	}
 
 	if err := app.Run(os.Args); err != nil {
@@ -52,11 +71,80 @@ func main() {
 	}
 }
 
-func runClient(c *cli.Context) error {
+// createClient creates a KMS client from CLI context using the global flags.
+func createClient(c *cli.Context, l *zap.Logger) (*kmsClient.Client, error) {
+	ethClient := ethereum.NewEthereumClient(&ethereum.EthereumClientConfig{
+		BaseUrl:   c.String("eth-rpc-url"),
+		BlockType: ethereum.BlockType_Latest,
+	}, l)
+
+	l1Client, err := ethClient.GetEthereumContractCaller()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Ethereum contract caller: %w", err)
+	}
+
+	contractCaller, err := caller.NewContractCaller(l1Client, nil, l)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create contract caller: %w", err)
+	}
+
+	return kmsClient.NewClient(&kmsClient.ClientConfig{
+		AVSAddress:     c.String("avs-address"),
+		OperatorSetID:  uint32(c.Uint("operator-set-id")),
+		Logger:         l,
+		ContractCaller: contractCaller,
+	})
+}
+
+// encryptCommand handles the encrypt subcommand.
+// Fetches the master public key from operator set and encrypts data using IBE.
+func encryptCommand(c *cli.Context) error {
+	logLevel := c.String("log-level")
+	l, err := kmscli.NewLogger(logLevel)
+	if err != nil {
+		return fmt.Errorf("failed to create logger: %w", err)
+	}
+
+	appID := c.String("app-id")
+	data := c.String("data")
+	outputFile := c.String("output")
+
+	l.Sugar().Infow("Encrypting data for app", "app_id", appID)
+
+	client, err := createClient(c, l)
+	if err != nil {
+		return fmt.Errorf("failed to create client: %w", err)
+	}
+
+	operators, err := client.GetOperators()
+	if err != nil {
+		return fmt.Errorf("failed to get operators: %w", err)
+	}
+
+	encryptedData, err := client.Encrypt(appID, []byte(data), operators)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt data: %w", err)
+	}
+
+	encryptedHex := hexutil.Encode(encryptedData)
+	if outputFile != "" {
+		if err := os.WriteFile(outputFile, []byte(encryptedHex), 0600); err != nil {
+			return fmt.Errorf("failed to write to file: %w", err)
+		}
+		l.Sugar().Infow("Encrypted data written to file", "path", outputFile)
+	} else {
+		fmt.Println(encryptedHex)
+	}
+
+	return nil
+}
+
+// decryptCommand handles the decrypt subcommand.
+// Full TEE workflow: attestation, threshold key recovery, IBE decryption, address derivation, user API posting.
+func decryptCommand(c *cli.Context) error {
 	ctx := context.Background()
 	cfg := kmscli.NewConfigFromCLI(c)
 
-	// Create logger
 	l, err := kmscli.NewLogger(cfg.LogLevel)
 	if err != nil {
 		return fmt.Errorf("failed to create logger: %w", err)
@@ -129,36 +217,14 @@ func runClient(c *cli.Context) error {
 		"app_id", claims.AppID,
 		"image_digest", claims.ImageDigest)
 
-	// Step 4: Create Ethereum client and contract caller
+	// Step 4: Create KMS client
 	l.Sugar().Infow("Connecting to Ethereum", "rpc", cfg.ETHRpcURL)
-	ethClient := ethereum.NewEthereumClient(&ethereum.EthereumClientConfig{
-		BaseUrl:   cfg.ETHRpcURL,
-		BlockType: ethereum.BlockType_Latest,
-	}, l)
-
-	l1Client, err := ethClient.GetEthereumContractCaller()
-	if err != nil {
-		return fmt.Errorf("failed to get Ethereum contract caller: %w", err)
-	}
-
-	contractCaller, err := caller.NewContractCaller(l1Client, nil, l)
-	if err != nil {
-		return fmt.Errorf("failed to create contract caller: %w", err)
-	}
-
-	// Step 5: Create KMS client
-	l.Sugar().Infow("Creating KMS client", "avs", cfg.AVSAddress, "operator_set_id", cfg.OperatorSetID)
-	kmsClientInstance, err := kmsClient.NewClient(&kmsClient.ClientConfig{
-		AVSAddress:     cfg.AVSAddress,
-		OperatorSetID:  cfg.OperatorSetID,
-		Logger:         l,
-		ContractCaller: contractCaller,
-	})
+	kmsClientInstance, err := createClient(c, l)
 	if err != nil {
 		return fmt.Errorf("failed to create KMS client: %w", err)
 	}
 
-	// Step 6: Retrieve secrets using distributed KMS with GCP attestation
+	// Step 5: Retrieve secrets using distributed KMS with GCP attestation
 	l.Sugar().Info("Retrieving secrets from distributed KMS operators")
 	result, err := kmsClientInstance.RetrieveSecretsWithOptions(cfg.AppID, &kmsClient.SecretsOptions{
 		AttestationMethod: "gcp",
@@ -174,14 +240,14 @@ func runClient(c *cli.Context) error {
 		"responses", result.ResponseCount,
 		"threshold", result.ThresholdNeeded)
 
-	// Step 6b: Verify secrets result integrity using KMS signing key
+	// Step 5b: Verify secrets result integrity using KMS signing key
 	l.Sugar().Info("Verifying secrets result integrity")
 	if err := localcrypto.VerifySecretsResult(kmsSigningKey, result.EncryptedEnv, result.PublicEnv, result.ResponseCount, result.ThresholdNeeded); err != nil {
 		return fmt.Errorf("secrets result verification failed: %w", err)
 	}
 	l.Sugar().Info("Secrets result verification passed")
 
-	// Step 7: Decrypt environment data using recovered app private key
+	// Step 6: Decrypt environment data using recovered app private key
 	l.Sugar().Info("Decrypting environment with recovered private key")
 
 	// Parse encrypted env (should be hex-encoded IBE ciphertext)
@@ -195,7 +261,7 @@ func runClient(c *cli.Context) error {
 		return fmt.Errorf("failed to decrypt environment: %w", err)
 	}
 
-	// Step 8: Parse environment JSON
+	// Step 7: Parse environment JSON
 	var envVars map[string]string
 	if err := json.Unmarshal(decryptedEnvBytes, &envVars); err != nil {
 		return fmt.Errorf("failed to unmarshal env JSON: %w", err)
@@ -215,8 +281,7 @@ func runClient(c *cli.Context) error {
 		}
 	}
 
-	// Step 9: Derive addresses from mnemonic and post to user API
-	// Matches pattern from kms-client/pkg/envclient/envclient.go
+	// Step 8: Derive addresses from mnemonic and post to user API
 	if mnemonic, ok := envVars[types.MnemonicEnvVarName]; ok && cfg.UserAPIURL != "" {
 		l.Sugar().Info("Deriving addresses from mnemonic")
 
@@ -253,7 +318,7 @@ func runClient(c *cli.Context) error {
 		}
 	}
 
-	// Step 10: Output environment variables
+	// Step 9: Output environment variables
 	envJSONBytes, _ := json.Marshal(envVars)
 
 	if cfg.OutputFile != "" {

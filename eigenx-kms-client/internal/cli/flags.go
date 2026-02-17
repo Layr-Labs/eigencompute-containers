@@ -63,4 +63,10 @@ var (
 		Usage:   "AppController contract address (optional, for on-chain env retrieval)",
 		EnvVars: []string{"APP_CONTROLLER_ADDRESS"},
 	}
+
+	DataFlag = &cli.StringFlag{
+		Name:     "data",
+		Usage:    "Data to encrypt (as string)",
+		Required: true,
+	}
 )
