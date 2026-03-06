@@ -16,7 +16,7 @@ import (
 func main() {
 	app := &cli.App{
 		Name:  "kms-client",
-		Usage: "Fetch environment variables from an EigenX KMS server (with attestation)",
+		Usage: "Fetch environment variables from an EigenCompute KMS server (with attestation)",
 		Flags: []cli.Flag{
 			kmscli.KMSServerURLFlag,
 			kmscli.KMSSigningKeyFileFlag,
@@ -44,10 +44,11 @@ func runClient(c *cli.Context) error {
 		return fmt.Errorf("failed to read KMS signing key: %w", err)
 	}
 
-	tokenProvider := envclient.NewConfidentialSpaceTokenProvider(cfg.Logger)
-	client := envclient.NewEnvClient(cfg.Logger, tokenProvider, kmsSigningKeyBytes, cfg.ServerURL, cfg.UserAPIURL)
+	// Create attestation provider
+	attestationProvider := envclient.NewBoundEvidenceProvider(cfg.Logger)
 
-	envJSONBytes, err := client.GetEnv(ctx)
+	envClient := envclient.NewEnvClient(cfg.Logger, attestationProvider, kmsSigningKeyBytes, cfg.ServerURL, cfg.UserAPIURL)
+	envJSONBytes, err := envClient.GetEnv(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get env: %w", err)
 	}
@@ -81,5 +82,3 @@ func writeEnvFile(cfg *kmscli.Config, envJSONBytes []byte) error {
 	cfg.Logger.Info("Environment variables written to file", "file", cfg.OutputFile, "count", len(envVars))
 	return nil
 }
-
-

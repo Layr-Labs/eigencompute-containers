@@ -14,14 +14,16 @@ type SignedResponse[T any] struct {
 	Signature []byte `json:"signature"`
 }
 
-// EnvRequestV2 is the request payload for the KMS server /env/v2 endpoint.
-type EnvRequestV2 struct {
-	JWTWithAttestedRSAKey string `json:"jwtWithAttestedRsaKey"`
-	RSAKeyPEM             string `json:"rsaKey"`
+// EnvRequestV3 represents a V3 request with raw attestation bytes (self-verified)
+type EnvRequestV3 struct {
+	// Attestation is base64-encoded raw attestation protobuf bytes.
+	// The attestation's report data contains a hash of the RSA key, binding them together.
+	Attestation string `json:"attestation"`
+	// RSAKeyPEM is the RSA public key in PEM format, attested via the nonce in the attestation.
+	RSAKeyPEM string `json:"rsaKey"`
 }
 
-// EnvResponseV2 is the response payload contained in SignedResponse.Data for /env/v2.
-type EnvResponseV2 struct {
+type EnvResponseV3 struct {
 	EncryptedCombinedEnv string `json:"encryptedCombinedEnv"`
 }
 
@@ -39,5 +41,3 @@ type AddressesResponseV1 struct {
 	EVMAddresses    []EVMAddressAndDerivationPath    `json:"evmAddresses"`
 	SolanaAddresses []SolanaAddressAndDerivationPath `json:"solanaAddresses"`
 }
-
-
