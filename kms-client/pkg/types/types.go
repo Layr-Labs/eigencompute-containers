@@ -40,4 +40,31 @@ type AddressesResponseV1 struct {
 	SolanaAddresses []SolanaAddressAndDerivationPath `json:"solanaAddresses"`
 }
 
+// EnvRequestV3 is the request payload for the KMS server /env/v3 endpoint.
+// V3 uses raw attestation bytes (base64-encoded) instead of a JWT.
+// The attestation's report data contains a hash of the RSA key, binding them together.
+type EnvRequestV3 struct {
+	Attestation string `json:"attestation"`
+	RSAKeyPEM   string `json:"rsaKey"`
+}
+
+// EnvResponseV3 is the response payload contained in SignedResponse.Data for /env/v3.
+type EnvResponseV3 struct {
+	EncryptedCombinedEnv string `json:"encryptedCombinedEnv"`
+}
+
+// AttestRequest is the request payload for the KMS server /auth/attest endpoint.
+type AttestRequest struct {
+	Version                int    `json:"version"`
+	EncryptedJWTWithRSAKey string `json:"encryptedJWTWithRSAKey,omitempty"`
+	JWTWithAttestedRSAKey  string `json:"jwtWithAttestedRsaKey,omitempty"`
+	Attestation            string `json:"attestation,omitempty"`
+	RSAKeyPEM              string `json:"rsaKey,omitempty"`
+}
+
+// AttestResponse is the response payload for the KMS server /auth/attest endpoint.
+type AttestResponse struct {
+	Token string `json:"token"`
+}
+
 
