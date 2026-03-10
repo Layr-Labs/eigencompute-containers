@@ -155,7 +155,8 @@ func TestLegoManager_RemoteValid(t *testing.T) {
 
 // TestLegoManager_RemoteLoadError tests when remote storage returns an error
 func TestLegoManager_RemoteLoadError(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	opts := config.Config{
 		Mnemonic:      "test test test test test test test test test test test test",
@@ -185,7 +186,8 @@ func TestLegoManager_RemoteLoadError(t *testing.T) {
 
 // TestLegoManager_RemoteNoCert tests when remote storage has no certificate
 func TestLegoManager_RemoteNoCert(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	opts := config.Config{
 		Mnemonic:      "test test test test test test test test test test test test",
@@ -216,7 +218,8 @@ func TestLegoManager_RemoteNoCert(t *testing.T) {
 
 // TestLegoManager_RemoteExpired tests when remote certificate is expired
 func TestLegoManager_RemoteExpired(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	opts := config.Config{
 		Mnemonic:      "test test test test test test test test test test test test",
@@ -267,7 +270,8 @@ func TestLegoManager_RemoteExpired(t *testing.T) {
 
 // TestLegoManager_RenewalWindow tests when certificate is in renewal window
 func TestLegoManager_RenewalWindow(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	opts := config.Config{
 		Mnemonic:      "test test test test test test test test test test test test",
@@ -318,7 +322,8 @@ func TestLegoManager_RenewalWindow(t *testing.T) {
 
 // TestLegoManager_ForceIssue tests force issue flag
 func TestLegoManager_ForceIssue(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	opts := config.Config{
 		Mnemonic:      "test test test test test test test test test test test test",
@@ -402,7 +407,7 @@ func TestLegoManager_NoExpiryInMeta(t *testing.T) {
 
 	storage := &mockLegoStorage{
 		chain: testChain,
-		meta: storage.Metadata{
+		meta:  storage.Metadata{
 			// ExpiresAt is zero - should parse from cert
 		},
 	}
@@ -427,7 +432,8 @@ func TestLegoManager_NoExpiryInMeta(t *testing.T) {
 
 // TestLegoManager_InvalidCertData tests when certificate data can't be parsed
 func TestLegoManager_InvalidCertData(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	opts := config.Config{
 		Mnemonic:      "test test test test test test test test test test test test",
@@ -441,7 +447,7 @@ func TestLegoManager_InvalidCertData(t *testing.T) {
 
 	storage := &mockLegoStorage{
 		chain: []byte("invalid cert data"),
-		meta: storage.Metadata{
+		meta:  storage.Metadata{
 			// No expiry, and cert data is invalid
 		},
 	}
@@ -509,7 +515,8 @@ func TestLegoManager_WrongKey(t *testing.T) {
 
 // TestLegoManager_ClockOverride tests clock injection for time-based testing
 func TestLegoManager_ClockOverride(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	opts := config.Config{
 		Mnemonic:      "test test test test test test test test test test test test",
