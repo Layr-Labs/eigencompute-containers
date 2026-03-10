@@ -176,10 +176,30 @@ func (m *LegoManager) issueAndPersist(ctx context.Context, opts config.Config, p
 		PrivateKey: tlsKey, // Use our deterministically derived key!
 	}
 
-	// Obtain certificate (Lego v4 doesn't have ObtainWithContext)
-	certResource, err := client.Certificate.Obtain(request)
-	if err != nil {
-		return storage.Bundle{}, fmt.Errorf("obtain certificate: %w", err)
+	// Obtain certificate with retry loop for DNS propagation.
+	// Lego v4 doesn't have ObtainWithContext, and Obtain fails fast
+	// if the ACME challenge can't be validated (e.g. DNS not propagated).
+	var certResource *certificate.Resource
+	backoff := 5 * time.Second
+	const maxBackoff = 30 * time.Second
+	for attempt := 1; ; attempt++ {
+		certResource, err = client.Certificate.Obtain(request)
+		if err == nil {
+			break
+		}
+		if ctx.Err() != nil {
+			return storage.Bundle{}, fmt.Errorf("obtain certificate: timeout after %d attempts: %w", attempt, err)
+		}
+		m.log.Warn("certificate obtain failed, retrying", "attempt", attempt, "error", err, "next_retry", backoff)
+		select {
+		case <-time.After(backoff):
+		case <-ctx.Done():
+			return storage.Bundle{}, fmt.Errorf("obtain certificate: timeout after %d attempts: %w", attempt, err)
+		}
+		backoff *= 2
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
 	}
 
 	// Write certificate and key locally
