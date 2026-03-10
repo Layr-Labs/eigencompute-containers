@@ -28,8 +28,11 @@ func main() {
 		Action: runClient,
 		Commands: []*cli.Command{
 			{
-				Name:   "attest",
-				Usage:  "Request an attestation JWT from the KMS server",
+				Name:  "attest",
+				Usage: "Request an attestation JWT from the KMS server",
+				Flags: []cli.Flag{
+					kmscli.AudienceFlag,
+				},
 				Action: runAttest,
 			},
 		},
@@ -74,7 +77,7 @@ func runClient(c *cli.Context) error {
 
 func runAttest(c *cli.Context) error {
 	ctx := context.Background()
-	cfg := kmscli.NewConfigFromCLI(c)
+	cfg := kmscli.NewAttestConfigFromCLI(c)
 
 	cfg.Logger.Debug("Reading KMS signing key", "file", cfg.KMSSigningKey)
 	kmsSigningKeyBytes, err := os.ReadFile(cfg.KMSSigningKey)
@@ -85,7 +88,7 @@ func runAttest(c *cli.Context) error {
 	attestationProvider := envclient.NewBoundEvidenceProvider(cfg.Logger)
 	client := envclient.NewEnvClient(cfg.Logger, attestationProvider, kmsSigningKeyBytes, cfg.ServerURL, "")
 
-	token, err := client.Attest(ctx)
+	token, err := client.Attest(ctx, cfg.Audience)
 	if err != nil {
 		return fmt.Errorf("failed to get attestation JWT: %w", err)
 	}

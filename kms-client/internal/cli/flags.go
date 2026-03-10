@@ -41,6 +41,12 @@ var (
 		Usage:   "User API URL to POST attestation",
 		EnvVars: []string{"USERAPI_URL"},
 	}
+
+	AudienceFlag = &cli.StringFlag{
+		Name:    "audience",
+		Usage:   "JWT audience claim for attestation token",
+		EnvVars: []string{"ATTEST_AUDIENCE"},
+	}
 )
 
 

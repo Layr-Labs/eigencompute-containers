@@ -55,16 +55,15 @@ type EnvResponseV3 struct {
 
 // AttestRequest is the request payload for the KMS server /auth/attest endpoint.
 type AttestRequest struct {
-	Version                int    `json:"version"`
-	EncryptedJWTWithRSAKey string `json:"encryptedJWTWithRSAKey,omitempty"`
-	JWTWithAttestedRSAKey  string `json:"jwtWithAttestedRsaKey,omitempty"`
-	Attestation            string `json:"attestation,omitempty"`
-	RSAKeyPEM              string `json:"rsaKey,omitempty"`
+	Version     int    `json:"version"`
+	Attestation string `json:"attestation,omitempty"` // V3: base64-encoded raw attestation
+	RSAKeyPEM   string `json:"rsaKey,omitempty"`      // V3: RSA public key PEM
+	Audience    string `json:"audience,omitempty"`     // JWT audience claim
 }
 
 // AttestResponse is the response payload for the KMS server /auth/attest endpoint.
 type AttestResponse struct {
-	Token string `json:"token"`
+	EncryptedToken string `json:"encryptedToken"`
 }
 
 
