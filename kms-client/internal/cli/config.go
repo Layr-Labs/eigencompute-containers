@@ -32,6 +32,15 @@ func GetLogLevel(level string) slog.Level {
 	}
 }
 
+type AttestConfig struct {
+	ServerURL     string
+	KMSSigningKey string
+	LogLevel      string
+	OutputFile    string
+	Audience      string
+	Logger        *slog.Logger
+}
+
 func NewConfigFromCLI(c *cli.Context) *Config {
 	cfg := &Config{
 		ServerURL:     c.String(KMSServerURLFlag.Name),
@@ -40,6 +49,19 @@ func NewConfigFromCLI(c *cli.Context) *Config {
 		AppID:         c.String(AppIDFlag.Name),
 		OutputFile:    c.String(OutputFileFlag.Name),
 		UserAPIURL:    c.String(UserAPIURLFlag.Name),
+	}
+
+	cfg.Logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: GetLogLevel(cfg.LogLevel)}))
+	return cfg
+}
+
+func NewAttestConfigFromCLI(c *cli.Context) *AttestConfig {
+	cfg := &AttestConfig{
+		ServerURL:     c.String(KMSServerURLFlag.Name),
+		KMSSigningKey: c.String(KMSSigningKeyFileFlag.Name),
+		LogLevel:      c.String(LogLevelFlag.Name),
+		OutputFile:    c.String(OutputFileFlag.Name),
+		Audience:      c.String(AudienceFlag.Name),
 	}
 
 	cfg.Logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: GetLogLevel(cfg.LogLevel)}))

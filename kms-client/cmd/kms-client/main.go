@@ -26,6 +26,16 @@ func main() {
 			kmscli.UserAPIURLFlag,
 		},
 		Action: runClient,
+		Commands: []*cli.Command{
+			{
+				Name:  "attest",
+				Usage: "Request an attestation JWT from the KMS server",
+				Flags: []cli.Flag{
+					kmscli.AudienceFlag,
+				},
+				Action: runAttest,
+			},
+		},
 	}
 
 	if err := app.Run(os.Args); err != nil {
@@ -38,14 +48,18 @@ func runClient(c *cli.Context) error {
 	ctx := context.Background()
 	cfg := kmscli.NewConfigFromCLI(c)
 
+	if cfg.UserAPIURL == "" {
+		return fmt.Errorf("--userapi-url is required")
+	}
+
 	cfg.Logger.Debug("Reading KMS signing key", "file", cfg.KMSSigningKey)
 	kmsSigningKeyBytes, err := os.ReadFile(cfg.KMSSigningKey)
 	if err != nil {
 		return fmt.Errorf("failed to read KMS signing key: %w", err)
 	}
 
-	tokenProvider := envclient.NewConfidentialSpaceTokenProvider(cfg.Logger)
-	client := envclient.NewEnvClient(cfg.Logger, tokenProvider, kmsSigningKeyBytes, cfg.ServerURL, cfg.UserAPIURL)
+	attestationProvider := envclient.NewBoundEvidenceProvider(cfg.Logger)
+	client := envclient.NewEnvClient(cfg.Logger, attestationProvider, kmsSigningKeyBytes, cfg.ServerURL, cfg.UserAPIURL)
 
 	envJSONBytes, err := client.GetEnv(ctx)
 	if err != nil {
@@ -58,6 +72,36 @@ func runClient(c *cli.Context) error {
 
 	pretty, _ := json.MarshalIndent(json.RawMessage(envJSONBytes), "", "  ")
 	fmt.Printf("%s\n", string(pretty))
+	return nil
+}
+
+func runAttest(c *cli.Context) error {
+	ctx := context.Background()
+	cfg := kmscli.NewAttestConfigFromCLI(c)
+
+	cfg.Logger.Debug("Reading KMS signing key", "file", cfg.KMSSigningKey)
+	kmsSigningKeyBytes, err := os.ReadFile(cfg.KMSSigningKey)
+	if err != nil {
+		return fmt.Errorf("failed to read KMS signing key: %w", err)
+	}
+
+	attestationProvider := envclient.NewBoundEvidenceProvider(cfg.Logger)
+	client := envclient.NewEnvClient(cfg.Logger, attestationProvider, kmsSigningKeyBytes, cfg.ServerURL, "")
+
+	token, err := client.Attest(ctx, cfg.Audience)
+	if err != nil {
+		return fmt.Errorf("failed to get attestation JWT: %w", err)
+	}
+
+	if cfg.OutputFile != "" {
+		if err := os.WriteFile(cfg.OutputFile, []byte(token), 0600); err != nil {
+			return fmt.Errorf("failed to write token to file: %w", err)
+		}
+		cfg.Logger.Info("Attestation JWT written to file", "file", cfg.OutputFile)
+		return nil
+	}
+
+	fmt.Println(token)
 	return nil
 }
 
@@ -81,5 +125,3 @@ func writeEnvFile(cfg *kmscli.Config, envJSONBytes []byte) error {
 	cfg.Logger.Info("Environment variables written to file", "file", cfg.OutputFile, "count", len(envVars))
 	return nil
 }
-
-
