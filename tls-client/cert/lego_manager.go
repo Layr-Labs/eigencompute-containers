@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"time"
 
 	"github.com/Layr-Labs/tls-client/config"
@@ -122,6 +123,28 @@ func (m *LegoManager) EnsureCertificate(ctx context.Context, opts config.Config)
 func (m *LegoManager) issueAndPersist(ctx context.Context, opts config.Config, primary string, sans []string, tlsKey *ecdsa.PrivateKey, acctKey crypto.Signer) (storage.Bundle, error) {
 	m.log.Info("obtaining new certificate", "SANs", sans)
 
+	// Poll DNS until the A record resolves before contacting ACME.
+	// This prevents burning ACME's failed-validation rate limit (5 per hostname per hour)
+	// while the instance's A record propagates after boot.
+	backoff := 5 * time.Second
+	const maxBackoff = 30 * time.Second
+	for attempt := 1; ; attempt++ {
+		_, dnsErr := net.LookupHost(primary)
+		if dnsErr == nil {
+			break
+		}
+		m.log.Warn("DNS not yet propagated, waiting", "domain", primary, "attempt", attempt, "error", dnsErr, "next_retry", backoff)
+		select {
+		case <-time.After(backoff):
+		case <-ctx.Done():
+			return storage.Bundle{}, fmt.Errorf("obtain certificate: DNS not propagated after %d attempts: %w", attempt, dnsErr)
+		}
+		backoff *= 2
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
+	}
+
 	// Create Lego user
 	user := &LegoUser{
 		Email: opts.Email,
@@ -176,30 +199,10 @@ func (m *LegoManager) issueAndPersist(ctx context.Context, opts config.Config, p
 		PrivateKey: tlsKey, // Use our deterministically derived key!
 	}
 
-	// Obtain certificate with retry loop for DNS propagation.
-	// Lego v4 doesn't have ObtainWithContext, and Obtain fails fast
-	// if the ACME challenge can't be validated (e.g. DNS not propagated).
-	var certResource *certificate.Resource
-	backoff := 5 * time.Second
-	const maxBackoff = 30 * time.Second
-	for attempt := 1; ; attempt++ {
-		certResource, err = client.Certificate.Obtain(request)
-		if err == nil {
-			break
-		}
-		if ctx.Err() != nil {
-			return storage.Bundle{}, fmt.Errorf("obtain certificate: timeout after %d attempts: %w", attempt, err)
-		}
-		m.log.Warn("certificate obtain failed, retrying", "attempt", attempt, "error", err, "next_retry", backoff)
-		select {
-		case <-time.After(backoff):
-		case <-ctx.Done():
-			return storage.Bundle{}, fmt.Errorf("obtain certificate: timeout after %d attempts: %w", attempt, err)
-		}
-		backoff *= 2
-		if backoff > maxBackoff {
-			backoff = maxBackoff
-		}
+	// Obtain certificate (DNS is confirmed to be propagated)
+	certResource, err := client.Certificate.Obtain(request)
+	if err != nil {
+		return storage.Bundle{}, fmt.Errorf("obtain certificate: %w", err)
 	}
 
 	// Write certificate and key locally

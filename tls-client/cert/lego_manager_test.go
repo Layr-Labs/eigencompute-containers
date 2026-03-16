@@ -8,8 +8,10 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"log/slog"
 	"math/big"
+	"net"
 	"testing"
 	"time"
 
@@ -510,6 +512,68 @@ func TestLegoManager_WrongKey(t *testing.T) {
 	}
 	if err.Error() != "remote certificate does not match derived key" {
 		t.Errorf("Expected key mismatch error, got: %v", err)
+	}
+}
+
+// TestLegoManager_DNSNotPropagated verifies that when the domain has no A record the retry
+// loop skips Obtain entirely and the final error wraps a *net.DNSError — proving ACME was
+// never contacted and no failed-validation rate limit was consumed.
+// eigencompute-test-dns.eigencloud.xyz exists in the eigencloud.xyz zone but has no A record.
+func TestLegoManager_DNSNotPropagated(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	opts := config.Config{
+		Mnemonic:      "test test test test test test test test test test test test",
+		Domain:        "eigencompute-test-dns.eigencloud.xyz",
+		OutDir:        "/tmp/test",
+		CADir:         "https://acme-staging-v02.api.letsencrypt.org/directory",
+		Challenge:     config.HTTP01,
+		RenewalWindow: 30 * 24 * time.Hour,
+	}
+
+	manager := NewLegoManager(&mockLegoStorage{}, &mockLegoLocalWriter{}, slog.Default())
+
+	_, err := manager.EnsureCertificate(ctx, opts)
+	if err == nil {
+		t.Fatal("expected error for unpropagated DNS")
+	}
+
+	// Must be a DNS error — not an ACME error — confirming we never hit the ACME server.
+	var dnsErr *net.DNSError
+	if !errors.As(err, &dnsErr) {
+		t.Errorf("expected DNS error (ACME not contacted), got: %v", err)
+	}
+}
+
+// TestLegoManager_DNSPropagated verifies that when the domain resolves the retry loop
+// proceeds past the DNS check and actually attempts ACME (which will fail here because
+// there is no real ACME server, but the error must not be a DNS error).
+// eigencloud.xyz has a real A record.
+func TestLegoManager_DNSPropagated(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	opts := config.Config{
+		Mnemonic:      "test test test test test test test test test test test test",
+		Domain:        "eigencloud.xyz",
+		OutDir:        "/tmp/test",
+		CADir:         "https://acme-staging-v02.api.letsencrypt.org/directory",
+		Challenge:     config.HTTP01,
+		RenewalWindow: 30 * 24 * time.Hour,
+	}
+
+	manager := NewLegoManager(&mockLegoStorage{}, &mockLegoLocalWriter{}, slog.Default())
+
+	_, err := manager.EnsureCertificate(ctx, opts)
+	if err == nil {
+		t.Fatal("expected error (no real ACME server)")
+	}
+
+	// Must NOT be a DNS error — DNS resolved, so we passed the pre-check and hit ACME.
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		t.Errorf("expected ACME error (DNS resolved), got DNS error: %v", err)
 	}
 }
 
