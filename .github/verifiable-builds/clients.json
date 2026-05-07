@@ -6,6 +6,9 @@
   "kms-client": {
     "dockerfile_path": "kms-client/Dockerfile",
     "build_context_path": "kms-client"
+  },
+  "ecloud-drain-watcher": {
+    "dockerfile_path": "ecloud-drain-watcher/Dockerfile",
+    "build_context_path": "ecloud-drain-watcher"
   }
 }
-
