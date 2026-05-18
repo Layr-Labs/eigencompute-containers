@@ -6,6 +6,10 @@
   "kms-client": {
     "dockerfile_path": "kms-client/Dockerfile",
     "build_context_path": "kms-client"
+  },
+  "eigenx-kms-client": {
+    "dockerfile_path": "eigenx-kms-client/Dockerfile",
+    "build_context_path": "eigenx-kms-client"
   }
 }
 
