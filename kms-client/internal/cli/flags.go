@@ -36,6 +36,16 @@ var (
 		Usage: "Output file path to write environment variables as export KEY=\"VALUE\" lines",
 	}
 
+	// StorageKeyOutputFileFlag is required (not optional) so a caller
+	// invoking `derive-storage-key` without an output destination fails
+	// fast — emitting the key to stdout would leak it into shell history,
+	// terminal scrollback, and any logging that captures process output.
+	StorageKeyOutputFileFlag = &cli.StringFlag{
+		Name:     "output-file",
+		Usage:    "Output file path to write the hex-encoded 32-byte LUKS key (mode 0600)",
+		Required: true,
+	}
+
 	UserAPIURLFlag = &cli.StringFlag{
 		Name:    "userapi-url",
 		Usage:   "User API URL to POST attestation",
