@@ -1,1 +1,4 @@
 .idea
+
+# Local agent worktrees
+.claude/
